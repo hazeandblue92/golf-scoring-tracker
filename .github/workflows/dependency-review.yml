@@ -1,0 +1,13 @@
+name: Dependency Review
+
+# Spec §16.3: dependency license/provenance/audit checks.
+# actions/dependency-review-action is free for public repositories.
+on:
+  pull_request:
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4

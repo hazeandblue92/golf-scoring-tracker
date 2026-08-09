@@ -1,0 +1,11 @@
+/* Minimal reset only — the visual design system arrives later through a
+   separate design process. Do not add branding, colors, or layout here. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}

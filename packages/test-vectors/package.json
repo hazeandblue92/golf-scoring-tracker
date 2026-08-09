@@ -1,0 +1,20 @@
+{
+  "name": "@gtt/test-vectors",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Golden scoring scenarios (human-reviewed) shared by client preview and server projection tests",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@gtt/scoring": "0.1.0"
+  }
+}

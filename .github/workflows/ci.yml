@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  # Spec §16.3: pull-request CI on free public-repo standard runners.
+  # Currently covers: clean install from lockfile, type check, unit and
+  # property tests, production web build. Remaining §16.3 steps that need
+  # a local Supabase stack are staged below as Phase 1 placeholders.
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Clean install from lockfile (§16.3)
+        run: npm ci
+      - name: Type check (§16.3)
+        run: npm run typecheck
+      - name: Unit and property tests (§16.3)
+        run: npx vitest run
+      - name: Production web build (§16.3)
+        run: npm run build --workspace apps/web --if-present
+      # Phase 1: start local Supabase; reset and apply migrations/seed (§16.3)
+      # - name: Start local Supabase
+      #   run: supabase start && supabase db reset
+      # Phase 1: database constraints, functions, and RLS tests (§16.3)
+      # - name: Database and RLS tests
+      #   run: npm run test:db --if-present
+      # Phase 1: Edge Function integration tests (§16.3)
+      # - name: Edge Function integration tests
+      #   run: npm run test:functions --if-present
+      # Phase 1: Playwright smoke in Chromium (§16.3)
+      # - name: Playwright smoke
+      #   run: npm run test:e2e --if-present
+      # Phase 1: axe automated accessibility checks (§16.3)
+      # - name: Accessibility checks
+      #   run: npm run test:axe --if-present
+
+  # Spec §16.3 dependency provenance/audit and §13.2 license gate.
+  # No new tooling dependencies yet; the license scan gate is completed
+  # manually until an ADR selects tooling.
+  licenses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Clean install from lockfile (§16.3)
+        run: npm ci
+      - name: Dependency tree integrity (§16.3)
+        run: npm ls --all --json > /dev/null
+      - name: License scan gate placeholder (§13.2)
+        run: echo "License scan gate (spec §13.2) is completed manually until the tooling decision lands in an ADR."

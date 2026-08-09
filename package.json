@@ -1,0 +1,30 @@
+{
+  "name": "golf-tournament-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Golf Tournament Tracker — zero-cost, offline-first golf league and tournament live scoring PWA",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "backend:start": "supabase start",
+    "backend:seed": "supabase db reset",
+    "web:start": "npm run dev --workspace apps/web",
+    "build": "npm run build --workspace apps/web --if-present",
+    "typecheck": "tsc -p packages/scoring && tsc -p packages/contracts && tsc -p packages/test-vectors",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "echo 'lint: configured in Phase 0 CI setup'"
+  },
+  "devDependencies": {
+    "fast-check": "4.9.0",
+    "typescript": "6.0.2",
+    "vitest": "4.1.10"
+  }
+}
