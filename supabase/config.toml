@@ -385,6 +385,14 @@ deno_version = 2
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
+# username-login is a public endpoint (spec 12.2): callers have no session
+# yet, so gateway JWT verification is disabled and the function enforces its
+# own nondisclosing checks and rate limits (spec 14.1). complete-activation
+# and account-admin keep default JWT verification and ALSO re-verify the
+# caller in-function (spec 2.3).
+[functions.username-login]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327
