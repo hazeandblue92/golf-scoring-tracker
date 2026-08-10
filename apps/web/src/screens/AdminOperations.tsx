@@ -1,16 +1,15 @@
-/**
- * Operations (spec §5.2): quota indicators, last backup, restore drill
- * date, app/schema versions, Supabase project status reminder, Edge
- * Function health, error counters, and data export.
- */
+import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { Link } from 'react-router';
+
+import { downloadEventExport, invokePhase1 } from '../lib/phase1.ts';
+import { getSupabaseClient } from '../lib/supabase.ts';
+
 export function AdminOperations() {
-  return (
-    <>
-      <h1>Operations</h1>
-      <p>
-        Quotas, backups, versions, service health, and data export for
-        operators.
-      </p>
-    </>
-  );
+  const [exporting, setExporting] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const query = useQuery({ queryKey: ['operations'], queryFn: async () => { const supabase = getSupabaseClient(); const [{ data: roles }, health] = await Promise.all([supabase.from('role_assignments').select('league_id,role').is('revoked_at', null).in('role', ['owner', 'league_admin']), invokePhase1<{ status: string; appVersion: string; engineVersion: string; dbOk: boolean }>('health', {})]); const leagueId = roles?.[0]?.league_id; const { data: events } = leagueId ? await supabase.from('events').select('id,name,status,starts_at').eq('league_id', leagueId).order('starts_at', { ascending: false }) : { data: [] }; const { data: backups } = await supabase.from('backup_runs').select('status,completed_at,last_tested_restore_on,artifact_checksum').order('started_at', { ascending: false }).limit(1); return { leagueId, events: events ?? [], backup: backups?.[0], health }; } });
+  async function download(eventId: string) { if (!query.data?.leagueId) return; setExporting(eventId); setError(null); try { await downloadEventExport(query.data.leagueId, eventId); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Export failed.'); } finally { setExporting(null); } }
+  if (!query.data) return <div className="screen"><div className="skeleton skeleton--rows" /></div>;
+  return <div className="screen operations-screen"><header className="page-header"><Link className="back-link" to="/dashboard">Back to dashboard</Link><h1>Operations</h1><p>Service health, portable data, and recovery readiness.</p></header>{error && <p className="form-message form-message--error">{error}</p>}<div className="operations-grid"><section><div className="section-heading"><h2>Service health</h2><span className={query.data.health.status === 'ok' ? 'state-success' : 'state-warning'}>{query.data.health.status}</span></div><dl className="fact-list"><dt>Database</dt><dd>{query.data.health.dbOk ? 'Available' : 'Degraded'}</dd><dt>App release</dt><dd>{query.data.health.appVersion}</dd><dt>Scoring engine</dt><dd>{query.data.health.engineVersion}</dd><dt>Cost guardrail</dt><dd>Free-tier only</dd></dl></section><section><div className="section-heading"><h2>Recovery</h2><span>{query.data.backup?.status ?? 'No run'}</span></div><dl className="fact-list"><dt>Last backup</dt><dd>{query.data.backup?.completed_at ? new Date(query.data.backup.completed_at).toLocaleString() : 'Not recorded'}</dd><dt>Restore drill</dt><dd>{query.data.backup?.last_tested_restore_on ?? 'Due before launch'}</dd></dl><p className="muted">Portable exports include frozen snapshots, raw scores, projections, and final result hashes. Account identities are excluded.</p></section></div><section className="section-block"><div className="section-heading"><h2>Event exports</h2><span>{query.data.events.length}</span></div><div className="export-list">{query.data.events.map((event) => <div key={event.id}><div><strong>{event.name}</strong><span>{event.status.replaceAll('_', ' ')}</span></div><button className="button button--quiet" type="button" disabled={exporting === event.id} onClick={() => void download(event.id)}>{exporting === event.id ? 'Preparing…' : 'Download JSON'}</button></div>)}</div><p><Link to="/privacy">Review data handling</Link> · Restore instructions are included in the repository runbook.</p></section></div>;
 }

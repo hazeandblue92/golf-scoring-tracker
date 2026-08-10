@@ -26,6 +26,20 @@ const EVENT_PROJECTION_ROUTES =
   /^\/(?:events\/[^/]+\/(?:snapshot|leaderboards?)(?:\/|$)|api\/projections\b)/;
 
 export default defineConfig({
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('/node_modules/@supabase/')) return 'supabase';
+          if (id.includes('/node_modules/dexie/')) return 'offline-db';
+          if (id.includes('/node_modules/@tanstack/')) return 'query';
+          if (id.includes('/node_modules/react-router/')) return 'router';
+          if (id.includes('/node_modules/react/') || id.includes('/node_modules/react-dom/')) return 'react';
+          return undefined;
+        },
+      },
+    },
+  },
   plugins: [
     react(),
     VitePWA({
@@ -37,9 +51,8 @@ export default defineConfig({
         short_name: 'GT Tracker',
         display: 'standalone',
         start_url: '/',
-        // Neutral placeholders only — the visual design system arrives later.
-        theme_color: '#1a1a1a',
-        background_color: '#ffffff',
+        theme_color: '#073d2e',
+        background_color: '#f4f3ed',
       },
       workbox: {
         // Deep links MUST survive deployment and refresh (spec §5.1).

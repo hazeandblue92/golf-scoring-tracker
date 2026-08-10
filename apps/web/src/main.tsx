@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { StrictMode } from 'react';
+import { StrictMode, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider } from 'react-router/dom';
 
 import './reset.css';
+import { SessionProvider } from './lib/session.tsx';
 import { router } from './router.tsx';
 
 const queryClient = new QueryClient();
@@ -16,7 +17,11 @@ if (container === null) {
 createRoot(container).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <SessionProvider>
+        <Suspense fallback={<p className="route-loading" role="status">Loading…</p>}>
+          <RouterProvider router={router} />
+        </Suspense>
+      </SessionProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

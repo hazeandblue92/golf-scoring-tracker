@@ -1,12 +1,12 @@
-/**
- * Event audit (spec §5.1 /admin/events/:eventId/audit): the audit trail of
- * score changes, corrections, republishes, and privileged actions.
- */
+import { useQuery } from '@tanstack/react-query';
+import { Link, useParams } from 'react-router';
+
+import { getSupabaseClient } from '../lib/supabase.ts';
+
 export function AdminEventAudit() {
-  return (
-    <>
-      <h1>Audit</h1>
-      <p>The audit trail of scoring and administrative actions for this event.</p>
-    </>
-  );
+  const { eventId = '' } = useParams();
+  const query = useQuery({ queryKey: ['audit', eventId], queryFn: async () => { const supabase = getSupabaseClient(); const [{ data: event }, { data: audit, error }, { data: mutations }] = await Promise.all([supabase.from('events').select('name').eq('id', eventId).single(), supabase.from('audit_events').select('id,action,target_type,target_id,reason,after_json,created_at,profiles(display_name)').eq('scope_event_id', eventId).order('created_at', { ascending: false }), supabase.from('score_mutations').select('id,event_entry_id,event_hole_id,result,event_revision,created_at,profiles(display_name)').eq('event_id', eventId).order('created_at', { ascending: false }).limit(100)]); if (error) throw error; return { event, rows: [...(audit ?? []).map((row) => ({ id: row.id, action: row.action, actor: profileName(row.profiles), detail: row.reason ?? row.target_type, revision: null as number | null, created_at: row.created_at })), ...(mutations ?? []).map((row) => ({ id: row.id, action: `score.${row.result}`, actor: profileName(row.profiles), detail: 'Hole score mutation', revision: row.event_revision as number | null, created_at: row.created_at }))].sort((a, b) => b.created_at.localeCompare(a.created_at)) }; } });
+  return <div className="screen audit-screen"><header className="page-header"><Link className="back-link" to={`/admin/events/${eventId}/scoring`}>Back to control room</Link><h1>Audit trail</h1><p>{query.data?.event?.name ?? 'Event'} · append-only administrative and score history</p></header><div className="audit-list">{query.isLoading ? <div className="skeleton skeleton--rows" /> : query.data?.rows.length ? query.data.rows.map((row) => <article key={row.id}><time dateTime={row.created_at}>{new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'medium' }).format(new Date(row.created_at))}</time><div><strong>{row.action}</strong><span>{row.detail} · {row.actor}{row.revision === null ? '' : ` · revision ${row.revision}`}</span></div></article>) : <p className="empty-inline">No audit events have been recorded.</p>}</div></div>;
 }
+
+function profileName(value: { display_name: string } | { display_name: string }[] | null) { return (Array.isArray(value) ? value[0]?.display_name : value?.display_name) ?? 'System'; }

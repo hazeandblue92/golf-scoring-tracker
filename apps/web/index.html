@@ -3,9 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#073d2e" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https: wss: http://127.0.0.1:54321 ws://127.0.0.1:54321; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+    />
     <title>Golf Tournament Tracker</title>
   </head>
   <body>
+    <!-- THESIS: a course-day control surface where score and sync state are always legible. OWN-WORLD: restrained turf, paper, daylight contrast, scorecard rules, and 44px controls. STORY: find the active event, score a hole, confirm device/server state, then check the live board. FIRST VIEWPORT: immediate resume action and event status; no decorative dashboard metrics. -->
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

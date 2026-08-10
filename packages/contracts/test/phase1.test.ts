@@ -1,0 +1,61 @@
+import { describe, expect, it } from 'vitest'
+
+import {
+  publishEventRequestSchema,
+  resolveScoreConflictRequestSchema,
+  saveEventDraftRequestSchema,
+} from '../src/index.ts'
+
+const id = (suffix: string) => `00000000-0000-4000-8000-${suffix.padStart(12, '0')}`
+
+describe('Phase 1 organizer contracts', () => {
+  it('accepts one complete individual-gross draft request', () => {
+    const parsed = saveEventDraftRequestSchema.safeParse({
+      leagueId: id('1'),
+      seasonId: id('2'),
+      name: 'Opening Day',
+      timezone: 'America/Detroit',
+      startsAt: '2026-09-12T09:00:00-04:00',
+      endsAt: null,
+      visibility: 'league',
+      teeSetId: id('3'),
+      participantIds: [id('4'), id('5')],
+    })
+    expect(parsed.success).toBe(true)
+    if (parsed.success) expect(parsed.data.scorerProfileIds).toEqual([])
+  })
+
+  it('rejects duplicate participant ids before setup reaches the server', () => {
+    const duplicate = id('4')
+    const parsed = saveEventDraftRequestSchema.safeParse({
+      leagueId: id('1'), seasonId: id('2'), name: 'Opening Day',
+      timezone: 'UTC', startsAt: '2026-09-12T13:00:00Z', endsAt: null,
+      visibility: 'league', teeSetId: id('3'),
+      participantIds: [duplicate, duplicate], scorerProfileIds: [],
+    })
+    expect(parsed.success).toBe(false)
+  })
+
+  it('defaults publish to a published-but-closed event', () => {
+    const parsed = publishEventRequestSchema.parse({ eventId: id('8') })
+    expect(parsed.openScoring).toBe(false)
+  })
+
+  it('requires a valid numeric shape for manual conflict resolution', () => {
+    const invalid = resolveScoreConflictRequestSchema.safeParse({
+      conflictId: id('9'),
+      choice: 'manual',
+      reason: 'Committee reviewed both cards',
+      manualValue: { status: 'complete', grossStrokes: null, notes: null },
+    })
+    expect(invalid.success).toBe(false)
+
+    const valid = resolveScoreConflictRequestSchema.safeParse({
+      conflictId: id('9'),
+      choice: 'manual',
+      reason: 'Committee reviewed both cards',
+      manualValue: { status: 'complete', grossStrokes: 5, notes: null },
+    })
+    expect(valid.success).toBe(true)
+  })
+})

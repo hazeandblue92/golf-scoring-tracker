@@ -123,7 +123,6 @@ Deno.serve(async (req: Request) => {
   // ── Step 3: recompute and publish projections ────────────────────────────
   const service = serviceClient()
   let projectionRevision: number | null = null
-  let lastPublishStatus = 'stale'
 
   for (let attempt = 0; attempt < MAX_PUBLISH_ATTEMPTS; attempt++) {
     let snapshot
@@ -155,7 +154,6 @@ Deno.serve(async (req: Request) => {
     }
 
     const pub = published as { status: string; event_revision?: number }
-    lastPublishStatus = pub.status
     if (pub.status === 'published') {
       projectionRevision = pub.event_revision ?? snapshot.event.scoring_revision
       break
@@ -177,6 +175,5 @@ Deno.serve(async (req: Request) => {
     projectionRevision,
     errorCode: null,
     correlationId,
-    ...(projectionRevision === null ? { projectionStatus: lastPublishStatus } : {}),
   })
 })

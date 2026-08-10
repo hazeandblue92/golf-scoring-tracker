@@ -1,12 +1,11 @@
-/**
- * Offline status (spec §5.1 /offline): which events are available offline
- * and the state of unsynced data.
- */
+import { useQuery } from '@tanstack/react-query';
+
+import { db } from '../lib/offline/db.ts';
+import { outboxCounts, syncOutbox, unsyncedCount } from '../lib/offline/outbox.ts';
+
 export function Offline() {
-  return (
-    <>
-      <h1>Offline</h1>
-      <p>Events available offline and the state of unsynced scores.</p>
-    </>
-  );
+  const query = useQuery({ queryKey: ['offline-state'], refetchInterval: 2_000, queryFn: async () => { const [snapshots, counts, rows] = await Promise.all([db.eventSnapshots.toArray(), outboxCounts(), db.outbox.toArray()]); return { snapshots, counts, rows }; } });
+  const counts = query.data?.counts;
+  const unsynced = counts ? unsyncedCount(counts) : 0;
+  return <div className="screen narrow-screen"><header className="page-header"><h1>Offline and sync</h1><p>Score entry works through interruptions because every submitted hole is written to this device first.</p></header><section className="offline-state"><div className={navigator.onLine ? 'connection-state state-success' : 'connection-state state-warning'}><strong>{navigator.onLine ? 'Online' : 'Offline'}</strong><span>{navigator.onLine ? 'Server sync is available' : 'Scores will remain on this device'}</span></div><dl className="fact-list"><dt>Waiting to sync</dt><dd>{unsynced}</dd><dt>Queued</dt><dd>{counts?.queued ?? 0}</dd><dt>Conflicts</dt><dd>{counts?.conflict ?? 0}</dd><dt>Rejected</dt><dd>{counts?.rejected ?? 0}</dd></dl><button className="button button--primary" type="button" disabled={!navigator.onLine || unsynced === 0} onClick={async () => { await syncOutbox(); await query.refetch(); }}>Sync now</button></section><section className="section-block"><div className="section-heading"><h2>Available event data</h2><span>{query.data?.snapshots.length ?? 0}</span></div>{query.data?.snapshots.length ? query.data.snapshots.map((snapshot) => <div className="snapshot-row" key={`${snapshot.userId}:${snapshot.eventId}`}><strong>{snapshot.eventId}</strong><span>Saved {new Date(snapshot.cachedAt).toLocaleString()}</span></div>) : <p className="empty-inline">Open a published event while online to make its permitted snapshot available here.</p>}</section><p className="muted">Signing out clears league data from this device. The app always names the exact unsynced count before allowing that action.</p></div>;
 }

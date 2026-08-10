@@ -1,12 +1,5 @@
-/**
- * Privacy notice (spec §5.1 /privacy): what the app stores, on device and
- * on the server, and the acknowledgment users accept at activation.
- */
+import { Link } from 'react-router';
+
 export function Privacy() {
-  return (
-    <>
-      <h1>Privacy</h1>
-      <p>What this app stores, where, and why.</p>
-    </>
-  );
+  return <article className="legal-screen"><header><Link className="wordmark" to="/dashboard">Golf Tracker</Link><h1>Privacy notice</h1><p>Version 1 · Effective August 2026</p></header><section><h2>What the league stores</h2><p>Your organizer may store a username, display name, league membership, handicap history, event entries, and the scores and attestations needed to run league events. The service does not require your personal email address.</p></section><section><h2>What stays on this device</h2><p>The app keeps permitted event snapshots, score drafts, unsynced mutations, and short-lived server receipts in browser storage so scoring survives weak coverage, refreshes, and device locks. Signing out clears this league data after warning about any unsynced scores.</p></section><section><h2>How scores are used</h2><p>Raw scores and frozen event rules are the source of truth. Leaderboards are reproducible projections. Every accepted change carries an actor, time, and revision; organizer corrections and conflict decisions are audited.</p></section><section><h2>Sharing and retention</h2><p>League-visible or public event settings control who can see published results. Organizer notes, credentials, tokens, and device subscription secrets are never part of public results or portable event exports.</p></section><section><h2>Your choices</h2><p>Ask your league organizer to correct your roster data, disable your account, or explain the league’s retention policy. Disabling access keeps historical score attribution intact.</p></section><footer><Link to="/sign-in">Return to sign in</Link></footer></article>;
 }

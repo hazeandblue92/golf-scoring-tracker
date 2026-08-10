@@ -12,3 +12,4 @@ supabase/.branches/
 *.log
 playwright-report/
 test-results/
+Claude Handoff/

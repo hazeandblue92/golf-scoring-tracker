@@ -22,18 +22,21 @@ Dependency provenance review runs via `actions/dependency-review-action@v4`
 on pull requests. Dependabot keeps npm and github-actions dependencies
 current weekly with grouped minor/patch updates.
 
-## Deferred §16.3 steps
+As of 2026-08-10, a separate `integration` job starts local Supabase, resets
+and seeds the database, and runs the serial database, Edge Function, and RLS
+suite. It then runs the Phase 1 Playwright journey in Chromium; the journey
+includes axe checks on the public entry surfaces. The job always stops the
+ephemeral stack without retaining a backup.
 
-Each step below is deferred until local Supabase support exists, and is
-staged as a commented "Phase 1" placeholder in `.github/workflows/ci.yml`:
+## Remaining §16.3 steps
 
-- Start local Supabase; reset and apply migrations/seed — Phase 1 (backend setup)
-- Database constraints, functions, and RLS test suites — Phase 1 (backend setup)
-- Edge Function integration tests — Phase 1 (Edge Functions land)
-- Playwright smoke in Chromium (scheduled full suite adds Firefox/WebKit) — Phase 1 (web app shell)
-- axe automated accessibility checks — Phase 1 (web app shell)
-- Format/lint and coverage thresholds — added once tooling is standardized
-- Bundle-budget check — added with the production web build pipeline
+Local Supabase, database/RLS, Edge Function, Chromium Playwright, axe, and
+static source-lint gates are implemented. The remaining hardening work is:
+
+- scheduled Firefox/WebKit coverage
+- per-file scoring coverage ratchets
+- automated dependency-license classification
+- a measured route-level bundle budget
 
 ## Consequences
 

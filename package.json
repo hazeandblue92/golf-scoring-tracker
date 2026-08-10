@@ -20,14 +20,20 @@
     "typecheck": "tsc -p packages/scoring && tsc -p packages/contracts && tsc -p packages/test-vectors",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "echo 'lint: configured in Phase 0 CI setup'",
-    "test:integration": "vitest run --root tests/integration"
+    "lint": "eslint . --max-warnings=0",
+    "test:integration": "vitest run --root tests/integration",
+    "test:e2e": "playwright test",
+    "restore:export": "node scripts/restore-export.mjs"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.62.1",
     "@supabase/supabase-js": "^2.112.2",
+    "eslint": "^10.8.1",
     "fast-check": "4.9.0",
     "supabase": "^2.113.0",
     "typescript": "6.0.2",
+    "typescript-eslint": "^8.66.0",
     "vitest": "4.1.10"
   }
 }

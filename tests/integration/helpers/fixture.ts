@@ -68,6 +68,8 @@ export interface ScoringFixture {
   service: SupabaseClient
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
 function must<T>(
   result: { data: T | null; error: { message: string } | null },
   what: string,
@@ -125,9 +127,19 @@ export async function createAccount(
   const auth = createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
   })
-  const signIn = await auth.auth.signInWithPassword({ email, password })
-  if (signIn.error || !signIn.data.session) {
-    throw new Error(`fixture: sign-in failed for ${username} — ${signIn.error?.message}`)
+  let accessToken: string | undefined
+  let signInError: string | undefined
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const signIn = await auth.auth.signInWithPassword({ email, password })
+    if (!signIn.error && signIn.data.session) {
+      accessToken = signIn.data.session.access_token
+      break
+    }
+    signInError = signIn.error?.message
+    if (attempt < 4) await sleep(500 * attempt)
+  }
+  if (accessToken === undefined) {
+    throw new Error(`fixture: sign-in failed for ${username} — ${signInError}`)
   }
 
   return {
@@ -135,7 +147,7 @@ export async function createAccount(
     username,
     password,
     displayName,
-    accessToken: signIn.data.session.access_token,
+    accessToken,
   }
 }
 
@@ -202,12 +214,15 @@ export async function buildScoringFixture(
   const playerCount = options.playerCount ?? 4
   const service = serviceClient()
 
-  const [director, scorer, player, outsider] = await Promise.all([
-    createAccount(service, { displayName: 'Director' }),
-    createAccount(service, { displayName: 'Scorer' }),
-    createAccount(service, { displayName: 'Player One' }),
-    createAccount(service, { displayName: 'Outsider' }),
-  ])
+  // GoTrue hashes passwords for both account creation and password grants.
+  // Running four of each concurrently can exhaust the small local stack's CPU
+  // and turn a healthy fixture into an upstream timeout. Account order is not
+  // meaningful, so build them serially and keep the integration signal about
+  // application behavior rather than local bcrypt contention.
+  const director = await createAccount(service, { displayName: 'Director' })
+  const scorer = await createAccount(service, { displayName: 'Scorer' })
+  const player = await createAccount(service, { displayName: 'Player One' })
+  const outsider = await createAccount(service, { displayName: 'Outsider' })
 
   // ── Event (created draft, then walked through the state machine) ──────────
   const eventId = randomUUID()
