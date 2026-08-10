@@ -181,6 +181,11 @@ small { color: var(--muted); }
 .revision-badge span { color: var(--muted); font-size: 0.65rem; font-weight: 800; text-transform: uppercase; }
 .revision-badge strong { color: var(--green-dark); font-size: 1.3rem; }
 .provisional-banner { padding: 0.75rem 0; color: var(--warning); border-bottom: 1px solid #d7a561; font-weight: 750; }
+/* Flight/division filter (§5.2). Horizontally scrollable so a long division
+   list never widens the page on a 320px phone. */
+.flight-filter { margin-top: 1rem; display: flex; gap: 0.5rem; overflow-x: auto; padding-bottom: 0.25rem; }
+.flight-filter .chip { flex: 0 0 auto; min-height: 44px; padding: 0 0.9rem; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 999px; font: inherit; font-weight: 700; cursor: pointer; }
+.flight-filter .chip--active { color: var(--paper); background: var(--green-dark); border-color: var(--green-dark); }
 .leaderboard { margin: 1rem -1rem 0; }
 .leaderboard-head, .leaderboard-row { display: grid; grid-template-columns: 48px minmax(0, 1fr) 54px 62px; align-items: center; gap: 0.5rem; }
 .leaderboard-head { min-height: 42px; padding: 0 1rem; color: var(--muted); background: #e7e8e2; font-size: 0.7rem; font-weight: 850; text-transform: uppercase; }
