@@ -11,6 +11,8 @@ type CompetitionPreset =
   | 'three_player_scramble'
   | 'four_player_scramble';
 type TeamDraft = { name: string; participantIds: string[] };
+/** A division within the event (§5.2). Membership is by participant id. */
+type FlightDraft = { id?: string; name: string; participantIds: string[] };
 type HandicapRecord = {
   id: string;
   value: number;
@@ -30,6 +32,7 @@ export function AdminEventSetup() {
   const [preset, setPreset] = useState<CompetitionPreset | null>(null);
   const [teamDrafts, setTeamDrafts] = useState<TeamDraft[] | null>(null);
   const [selectedTeeSetId, setSelectedTeeSetId] = useState<string | null>(null);
+  const [flightDrafts, setFlightDrafts] = useState<FlightDraft[]>([]);
   const [selectedStartsAt, setSelectedStartsAt] = useState<string | null>(null);
   const query = useQuery({
     queryKey: ['event-builder', routeEventId],
@@ -197,6 +200,28 @@ export function AdminEventSetup() {
         competitionPreset: activePreset,
         teams: isTeamEvent ? activeTeams : [],
       });
+      // Flights are a separate explicit call: they are not part of the draft
+      // RPC's contract, and an event with no divisions must not pay for them.
+      if (flightDrafts.length > 0) {
+        const named = flightDrafts
+          .map((flight) => ({ ...flight, name: flight.name.trim() }))
+          .filter((flight) => flight.name !== '');
+        if (named.length !== flightDrafts.length) {
+          throw new Error('Every flight needs a name before the draft can save.');
+        }
+        const { data: flightResult, error: flightError } = await getSupabaseClient().rpc(
+          'set_event_flights',
+          { p_event_id: result.eventId, p_flights: named },
+        );
+        const status = (flightResult as { status?: string; detail?: string } | null)?.status;
+        if (flightError || status !== 'saved') {
+          throw new Error(
+            (flightResult as { detail?: string } | null)?.detail
+              ?? flightError?.message
+              ?? 'Flights could not be saved.',
+          );
+        }
+      }
       setSavedEventId(result.eventId);
       setMessage('Draft saved. Server preflight passed and the event is ready to publish.');
     } catch (cause) {
@@ -358,9 +383,94 @@ export function AdminEventSetup() {
           </fieldset>
         </section>
 
-        <section className="preflight">
+        <section>
           <div className="builder-step">
             <span>4</span>
+            <div>
+              <h2>Flights and divisions</h2>
+              <p>Optional. Each flight is ranked separately and, where a competition pools skins by flight, keeps its own pool.</p>
+            </div>
+          </div>
+          <div className="flight-builder">
+            {flightDrafts.length === 0
+              ? <p className="muted">No flights: the whole field is ranked together.</p>
+              : flightDrafts.map((flight, flightIndex) => (
+                <article key={flight.id ?? `draft-${flightIndex}`} className="flight-draft">
+                  <div className="flight-draft__head">
+                    <label className="field">
+                      <span>Flight name</span>
+                      <input
+                        value={flight.name}
+                        maxLength={60}
+                        placeholder="A Flight"
+                        onChange={(event) => {
+                          const next = [...flightDrafts];
+                          next[flightIndex] = { ...flight, name: event.target.value };
+                          setFlightDrafts(next);
+                          setSavedEventId(null);
+                        }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="button button--quiet button--small"
+                      onClick={() => {
+                        setFlightDrafts(flightDrafts.filter((_, i) => i !== flightIndex));
+                        setSavedEventId(null);
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  <fieldset className="flight-draft__members">
+                    <legend>Players in this flight</legend>
+                    {data.participants
+                      .filter((participant) => activeIds.includes(participant.id))
+                      .map((participant) => {
+                        // A player belongs to at most one flight, so selecting
+                        // them here takes them out of any other.
+                        const checked = flight.participantIds.includes(participant.id);
+                        return (
+                          <label key={participant.id} className="selectable-row">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                const next = flightDrafts.map((candidate, i) => ({
+                                  ...candidate,
+                                  participantIds: i === flightIndex
+                                    ? (checked
+                                        ? candidate.participantIds.filter((id) => id !== participant.id)
+                                        : [...candidate.participantIds, participant.id])
+                                    : candidate.participantIds.filter((id) => id !== participant.id),
+                                }));
+                                setFlightDrafts(next);
+                                setSavedEventId(null);
+                              }}
+                            />
+                            <span><strong>{participant.display_name}</strong></span>
+                          </label>
+                        );
+                      })}
+                  </fieldset>
+                </article>
+              ))}
+            <button
+              type="button"
+              className="button button--secondary"
+              onClick={() => {
+                setFlightDrafts([...flightDrafts, { name: '', participantIds: [] }]);
+                setSavedEventId(null);
+              }}
+            >
+              Add flight
+            </button>
+          </div>
+        </section>
+
+        <section className="preflight">
+          <div className="builder-step">
+            <span>5</span>
             <div><h2>Preflight and publish</h2><p>These checks are repeated in one server transaction.</p></div>
           </div>
           <ul>

@@ -58,7 +58,7 @@ Deno.serve(async (req: Request) => {
     engineVersion: ENGINE_VERSION,
     // Must equal the number of committed migrations; the Phase 4 operations
     // integration test fails when this drifts.
-    schemaVersion: 21,
+    schemaVersion: 22,
     authOk,
     dbOk,
     correlationId,
