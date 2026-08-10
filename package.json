@@ -20,9 +20,11 @@
     "typecheck": "tsc -p packages/scoring && tsc -p packages/contracts && tsc -p packages/test-vectors",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "echo 'lint: configured in Phase 0 CI setup'"
+    "lint": "echo 'lint: configured in Phase 0 CI setup'",
+    "test:integration": "vitest run --root tests/integration"
   },
   "devDependencies": {
+    "@supabase/supabase-js": "^2.112.2",
     "fast-check": "4.9.0",
     "supabase": "^2.113.0",
     "typescript": "6.0.2",
