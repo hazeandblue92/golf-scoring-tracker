@@ -90,6 +90,14 @@ export interface SnapshotMatch {
   concession_by: string | null
 }
 
+/** Event-level flight/division (§5.2, §8.7 skins population). */
+export interface SnapshotFlight {
+  id: string
+  event_id: string
+  name: string
+  sort_order: number
+}
+
 export interface ScoringSnapshot {
   event: { id: string; status: string; scoring_revision: number }
   holes: SnapshotHole[]
@@ -105,6 +113,7 @@ export interface ScoringSnapshot {
     weight: number | null
   }>
   competitionEntities: SnapshotCompetitionEntity[]
+  flights: SnapshotFlight[]
   matches: SnapshotMatch[]
   individualScores: SnapshotIndividualScore[]
   teamScores: SnapshotTeamScore[]
@@ -143,6 +152,7 @@ export async function loadScoringSnapshot(
     holes,
     entries,
     teams,
+    flights,
     competitions,
     competitionRounds,
     individualScores,
@@ -162,6 +172,10 @@ export async function loadScoringSnapshot(
     selectAll<SnapshotTeam>(
       service, 'event_teams', 'id, event_id, name, status, playing_handicap',
       (q) => q.eq('event_id', eventId),
+    ),
+    selectAll<SnapshotFlight>(
+      service, 'flights', 'id, event_id, name, sort_order',
+      (q) => q.eq('event_id', eventId).order('sort_order'),
     ),
     selectAll<SnapshotCompetition>(
       service, 'competitions',
@@ -226,6 +240,7 @@ export async function loadScoringSnapshot(
     entries,
     teams,
     teamMembers,
+    flights,
     matches,
     competitions,
     competitionRounds,

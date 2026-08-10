@@ -144,6 +144,12 @@ const commonFields = {
   visibility: z.enum(['league', 'public', 'organizers']),
   /** Present only when the competition spans more than one round (§8.14). */
   multiRound: multiRoundConfigSchema.optional(),
+  /**
+   * Flighted ranking. 'per_flight' ranks entrants within their own flight or
+   * division so each flight has its own rank 1; 'none' ranks the whole field.
+   * Omitted behaves as 'none' so existing frozen rules keep their meaning.
+   */
+  flighting: z.enum(['none', 'per_flight']).optional(),
 } as const
 
 // ── Format variants ─────────────────────────────────────────────────────────

@@ -277,6 +277,54 @@ function matchSideCourseHandicap(
 }
 
 /**
+ * Re-rank rows inside each flight so every flight has its own rank 1
+ * (§5.2 flight/division results). Rows the engine left unranked — withdrawn,
+ * no-return, ineligible — stay unranked; they were never in contention.
+ */
+function rankWithinFlights(
+  rows: readonly ProjectionRow[],
+  flightOf: ReadonlyMap<string, string | null>,
+  direction: 'asc' | 'desc',
+): ProjectionRow[] {
+  const groups = new Map<string, ProjectionRow[]>()
+  const unranked: ProjectionRow[] = []
+  for (const row of rows) {
+    if (row.rank === null || row.resultPrimary === null) {
+      unranked.push(row)
+      continue
+    }
+    const key = flightOf.get(row.entityId) ?? '__no_flight__'
+    groups.set(key, [...(groups.get(key) ?? []), row])
+  }
+
+  const ranked: ProjectionRow[] = []
+  for (const group of groups.values()) {
+    const sorted = [...group].sort((a, b) => {
+      const left = a.resultPrimary as number
+      const right = b.resultPrimary as number
+      return direction === 'asc' ? left - right : right - left
+    })
+    const counts = new Map<number, number>()
+    for (const row of sorted) {
+      const value = row.resultPrimary as number
+      counts.set(value, (counts.get(value) ?? 0) + 1)
+    }
+    let position = 1
+    let previous: number | undefined
+    let previousRank = 1
+    for (const row of sorted) {
+      const value = row.resultPrimary as number
+      const rank = value === previous ? previousRank : position
+      ranked.push({ ...row, rank, isTied: (counts.get(value) ?? 0) > 1 })
+      previous = value
+      previousRank = rank
+      position += 1
+    }
+  }
+  return [...ranked, ...unranked]
+}
+
+/**
  * The §8.14 aggregation a competition declares, or null when it is a single
  * round. `metric` decides the basis: points tables rank high, strokes low.
  */
@@ -735,35 +783,88 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
             finalCarry: rules.skins.finalCarry,
             fractionalUnits: rules.skins.fractionalUnits ?? false,
           }
-          const result = calculateSkins({
-            holes,
-            entries: skinEntries,
-            rules: skinsRules,
-            phase,
-          })
-          provisional = result.provisional
-          warnings.push(...result.warnings.map((w) => ({ code: w.code, message: w.message })))
           const lookup = useTeams ? entityByTeam : entityByEntry
-          rows = result.totals.map((t) => ({
-            entityId: lookup.get(t.entityId) ?? t.entityId,
-            rank: null,
-            isTied: false,
-            thru: null,
-            resultPrimary: t.units,
-            resultSecondary: null,
-            displayPrimary: `${t.units}`,
-            status: 'complete',
-            detail: {},
-          }))
-          holeResults = result.holeOutcomes.map((o) => ({
-            entityId: o.winnerId ? (lookup.get(o.winnerId) ?? o.winnerId) : (rows[0]?.entityId ?? ''),
-            eventHoleId: o.holeId,
-            skinUnits: o.unitsAwarded,
-            skinCarriedUnits: o.poolCarriedIn,
-            skinWinner: o.winnerId !== null,
-            provisional: o.status === 'provisional',
-            detail: { outcome: o.status },
-          })).filter((h) => h.entityId !== '')
+
+          // §8.7: skins run on a DEFINED population. 'field' is one pool, but
+          // 'flight' means an independent pool (and independent carry) per
+          // flight — pooling them would let a player in one flight take a skin
+          // off someone they never competed against.
+          const skinFlightOf = new Map<string, string | null>()
+          for (const entity of entities) {
+            const engineId = entity.event_team_id ?? entity.event_entry_id
+            if (!engineId) continue
+            const entry = entity.event_entry_id
+              ? snapshot.entries.find((x) => x.id === entity.event_entry_id)
+              : undefined
+            skinFlightOf.set(engineId, entity.flight_id ?? entry?.flight_id ?? null)
+          }
+
+          let pools: Array<typeof skinEntries> = [skinEntries]
+          if (rules.skins.population === 'flight') {
+            const keys = [...new Set(skinEntries.map((e) => skinFlightOf.get(e.entityId) ?? null))]
+            if (keys.length === 1 && keys[0] === null) {
+              warnings.push({
+                code: 'SKINS_FLIGHT_NOT_ASSIGNED',
+                message:
+                  'Skins population is per flight but no entrant has a flight ' +
+                  'assigned; the whole field shares one pool.',
+              })
+            } else {
+              pools = keys.map((key) =>
+                skinEntries.filter((e) => (skinFlightOf.get(e.entityId) ?? null) === key),
+              )
+            }
+          } else if (rules.skins.population === 'group') {
+            // Group pools need the pairing groups, which the scoring snapshot
+            // does not carry. Say so rather than silently running field-wide.
+            warnings.push({
+              code: 'SKINS_GROUP_POPULATION_UNSUPPORTED',
+              message:
+                'Skins population "group" is not supported; the pool ran across ' +
+                'the whole field. Use field, flight, or teams.',
+            })
+          }
+
+          for (const pool of pools) {
+            if (pool.length === 0) continue
+            const result = calculateSkins({
+              holes,
+              entries: pool,
+              rules: skinsRules,
+              phase,
+            })
+            if (result.provisional) provisional = true
+            warnings.push(
+              ...result.warnings.map((w) => ({ code: w.code, message: w.message })),
+            )
+            const poolRows = result.totals.map((t) => ({
+              entityId: lookup.get(t.entityId) ?? t.entityId,
+              rank: null,
+              isTied: false,
+              thru: null,
+              resultPrimary: t.units,
+              resultSecondary: null,
+              displayPrimary: `${t.units}`,
+              status: 'complete',
+              detail: {},
+            }))
+            rows.push(...poolRows)
+            holeResults.push(
+              ...result.holeOutcomes
+                .map((o) => ({
+                  entityId: o.winnerId
+                    ? (lookup.get(o.winnerId) ?? o.winnerId)
+                    : (poolRows[0]?.entityId ?? ''),
+                  eventHoleId: o.holeId,
+                  skinUnits: o.unitsAwarded,
+                  skinCarriedUnits: o.poolCarriedIn,
+                  skinWinner: o.winnerId !== null,
+                  provisional: o.status === 'provisional',
+                  detail: { outcome: o.status },
+                }))
+                .filter((h) => h.entityId !== ''),
+            )
+          }
           break
         }
 
@@ -1103,6 +1204,42 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
       continue
     }
 
+    // ── Flighted ranking (§5.2) ──────────────────────────────────────────
+    // A competition entity carries its own flight; entries fall back to the
+    // roster's flight so an organizer only has to assign a player once.
+    const flightOf = new Map<string, string | null>()
+    for (const entity of entities) {
+      const entry = entity.event_entry_id
+        ? snapshot.entries.find((x) => x.id === entity.event_entry_id)
+        : undefined
+      flightOf.set(entity.id, entity.flight_id ?? entry?.flight_id ?? null)
+    }
+    const rankHigh = rules.metric === 'points' || rules.format === 'stableford' ||
+      rules.format === 'par_bogey'
+    const rankDirection: 'asc' | 'desc' = rankHigh ? 'desc' : 'asc'
+
+    if (rules.flighting === 'per_flight' && rules.format !== 'match') {
+      const distinctFlights = new Set(
+        rows.map((r) => flightOf.get(r.entityId) ?? null).filter((f) => f !== null),
+      )
+      if (distinctFlights.size === 0) {
+        warnings.push({
+          code: 'FLIGHTS_NOT_ASSIGNED',
+          message:
+            'Competition is configured to rank per flight but no entrant has a ' +
+            'flight assigned; the whole field is ranked together.',
+        })
+      } else {
+        rows = rankWithinFlights(rows, flightOf, rankDirection)
+      }
+    }
+    for (const row of rows) {
+      const flightId = flightOf.get(row.entityId) ?? null
+      if (flightId !== null) {
+        row.detail = { ...(row.detail ?? {}), flightId }
+      }
+    }
+
     // ── Countback (§8.15) ────────────────────────────────────────────────
     // Applied here rather than inside each engine so one implementation of
     // the rule serves every rankable format. Match play is excluded: a
@@ -1147,22 +1284,44 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
               'per-hole values to count back on; ties stand.',
           })
         } else {
-          const applied = applyCountback(
-            rows.map((r) => ({ entityId: r.entityId, rank: r.rank, isTied: r.isTied })),
-            byEntity,
-            { mode: rules.ties.mode, sequence: rules.ties.sequence },
-            pointsFormat ? 'desc' : 'asc',
-          )
-          const placementById = new Map(applied.rows.map((r) => [r.entityId, r]))
+          // Countback separates entities that SHARE a rank. Under flighted
+          // ranking two different flights each have their own rank 1, so they
+          // must be counted back separately or the engine would try to
+          // separate players who were never competing against each other.
+          const partitions =
+            rules.flighting === 'per_flight'
+              ? [...new Set(rows.map((r) => flightOf.get(r.entityId) ?? null))].map(
+                  (flightId) =>
+                    rows.filter((r) => (flightOf.get(r.entityId) ?? null) === flightId),
+                )
+              : [rows]
+
+          const placementById = new Map<
+            string,
+            { entityId: string; rank: number | null; isTied: boolean }
+          >()
+          for (const partition of partitions) {
+            const applied = applyCountback(
+              partition.map((r) => ({
+                entityId: r.entityId,
+                rank: r.rank,
+                isTied: r.isTied,
+              })),
+              byEntity,
+              { mode: rules.ties.mode, sequence: rules.ties.sequence },
+              pointsFormat ? 'desc' : 'asc',
+            )
+            for (const placed of applied.rows) placementById.set(placed.entityId, placed)
+            warnings.push(
+              ...applied.warnings.map((w) => ({ code: w.code, message: w.message })),
+            )
+          }
           rows = rows.map((row) => {
             const placement = placementById.get(row.entityId)
             return placement
               ? { ...row, rank: placement.rank, isTied: placement.isTied }
               : row
           })
-          warnings.push(
-            ...applied.warnings.map((w) => ({ code: w.code, message: w.message })),
-          )
         }
       }
     }
