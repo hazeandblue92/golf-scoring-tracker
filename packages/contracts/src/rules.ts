@@ -174,10 +174,24 @@ export const chapmanRulesSchema = z.strictObject({
   team: teamConfigSchema,
 })
 
+/**
+ * Shamble (§8.11): after the selected drive every player finishes their own
+ * ball, so the competition is scored from EXPLICIT INDIVIDUAL hole scores as
+ * best k of m or team aggregate. A team_ball source would contradict the
+ * format — there is no single team ball after the drive.
+ */
+export const shambleTeamConfigSchema = teamConfigSchema.refine(
+  (team) => team.scoreSource === 'individual',
+  {
+    message: 'shamble is scored from individual hole scores, not a team ball',
+    path: ['scoreSource'],
+  },
+)
+
 export const shambleRulesSchema = z.strictObject({
   format: z.literal('shamble'),
   ...commonFields,
-  team: teamConfigSchema,
+  team: shambleTeamConfigSchema,
 })
 
 export const parBogeyRulesSchema = z.strictObject({

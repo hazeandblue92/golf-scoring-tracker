@@ -20,6 +20,15 @@ jobs:
         run: npm ci
       - name: Type check (§16.3)
         run: npm run typecheck
+      # The Edge Functions are the authoritative write path and the projection
+      # engine, and `npm run typecheck` covers only the npm packages — so
+      # nothing compiled them until now. Deno checks them against the same
+      # shared engine sources the browser uses.
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Type check Edge Functions (§12, §16.3)
+        run: npm run typecheck:functions
       - name: Unit and property tests (§16.3)
         run: npx vitest run
       - name: Production web build (§16.3)

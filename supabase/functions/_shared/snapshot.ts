@@ -73,6 +73,23 @@ export interface SnapshotTeamScore {
   revision: number
 }
 
+/**
+ * A match-play pairing (§8.6). Sides are competition_entities, so one row can
+ * pair two individuals, two best-ball teams, or two team balls without the
+ * projection layer caring which.
+ */
+export interface SnapshotMatch {
+  id: string
+  competition_id: string
+  round_id: string
+  side_a_entity_id: string | null
+  side_b_entity_id: string | null
+  bracket_position: number | null
+  status: string
+  winner_entity_id: string | null
+  concession_by: string | null
+}
+
 export interface ScoringSnapshot {
   event: { id: string; status: string; scoring_revision: number }
   holes: SnapshotHole[]
@@ -86,6 +103,7 @@ export interface ScoringSnapshot {
     hole_scope: number[] | null
   }>
   competitionEntities: SnapshotCompetitionEntity[]
+  matches: SnapshotMatch[]
   individualScores: SnapshotIndividualScore[]
   teamScores: SnapshotTeamScore[]
 }
@@ -167,7 +185,7 @@ export async function loadScoringSnapshot(
   const competitionIds = competitions.map((c) => c.id)
   const teamIds = teams.map((t) => t.id)
 
-  const [competitionEntities, teamMembers] = await Promise.all([
+  const [competitionEntities, teamMembers, matches] = await Promise.all([
     competitionIds.length
       ? selectAll<SnapshotCompetitionEntity>(
           service, 'competition_entities',
@@ -179,6 +197,14 @@ export async function loadScoringSnapshot(
       ? selectAll<{ event_team_id: string; event_entry_id: string }>(
           service, 'event_team_members', 'event_team_id, event_entry_id',
           (q) => q.in('event_team_id', teamIds),
+        )
+      : Promise.resolve([]),
+    competitionIds.length
+      ? selectAll<SnapshotMatch>(
+          service, 'matches',
+          'id, competition_id, round_id, side_a_entity_id, side_b_entity_id, ' +
+            'bracket_position, status, winner_entity_id, concession_by',
+          (q) => q.in('competition_id', competitionIds).order('bracket_position'),
         )
       : Promise.resolve([]),
   ])
@@ -193,6 +219,7 @@ export async function loadScoringSnapshot(
     entries,
     teams,
     teamMembers,
+    matches,
     competitions,
     competitionRounds,
     competitionEntities,

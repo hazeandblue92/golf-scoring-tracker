@@ -88,11 +88,13 @@ export async function requireUser(
   if (!context?.userClaims?.id) {
     return rejected(401, 'AUTH_REQUIRED', correlationId, 'invalid session')
   }
+  // Without generated database types supabase-js infers the row as `never`,
+  // so name the shape here rather than reaching into an untyped result.
   const { data: profile, error: profileError } = await context.supabase
     .from('profiles')
     .select('status,must_change_password')
     .eq('id', context.userClaims.id)
-    .maybeSingle()
+    .maybeSingle<{ status: string; must_change_password: boolean }>()
   if (profileError || !profile || profile.status !== 'active') {
     return rejected(401, 'AUTH_REQUIRED', correlationId, 'inactive session')
   }

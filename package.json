@@ -29,7 +29,8 @@
     "load:prepare-local": "node --experimental-strip-types scripts/prepare-capacity-fixture.mjs",
     "load:capacity": "node scripts/load-capacity.mjs",
     "restore:backup": "node scripts/restore-backup.mjs",
-    "restore:export": "node scripts/restore-export.mjs"
+    "restore:export": "node scripts/restore-export.mjs",
+    "typecheck:functions": "cd supabase/functions && deno check $(ls -d */ | sed \"s#/##\" | while read d; do [ -f \"$d/index.ts\" ] && echo \"$d/index.ts\"; done)"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",

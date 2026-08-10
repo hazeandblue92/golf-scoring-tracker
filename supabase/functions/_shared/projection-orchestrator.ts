@@ -12,8 +12,11 @@ import { rulesJsonSchema } from '../../../packages/contracts/src/index.ts'
 import {
   ENGINE_VERSION,
   RULES_SCHEMA_VERSION,
+  applyCountback,
   calculateBestBall,
+  calculateMatch,
   calculateParBogey,
+  matchStrokeAllocation,
   calculateSkins,
   calculateStableford,
   calculateStrokePlay,
@@ -29,6 +32,8 @@ import {
   type HoleSnapshot,
   type IndividualHoleScore,
   type RoundingProfile,
+  type MatchHoleInput,
+  type Rational,
   type SkinsRules,
   type StablefordRules,
   type TeamHoleScore,
@@ -164,6 +169,91 @@ function individualScoresFor(
       status: s.score_status as HoleScoreStatus,
       revision: s.revision,
     }))
+}
+
+/**
+ * One match side's gross score per hole (§8.6).
+ *
+ * A side is a competition_entity, so it may be an individual or a team. For a
+ * team the team ball wins when one exists (foursomes, scramble); otherwise the
+ * side plays best-ball and the lowest member gross on the hole represents it.
+ * Nothing is fabricated: a hole no one completed stays null and the engine
+ * treats the hole as undetermined.
+ */
+function matchSideGrossByHole(
+  snapshot: ScoringSnapshot,
+  entity: { event_entry_id: string | null; event_team_id: string | null },
+  holeIds: Set<string>,
+): Map<string, number | null> {
+  const byHole = new Map<string, number | null>()
+
+  if (entity.event_entry_id) {
+    for (const score of snapshot.individualScores) {
+      if (score.event_entry_id !== entity.event_entry_id) continue
+      if (!holeIds.has(score.event_hole_id)) continue
+      byHole.set(score.event_hole_id, score.gross_strokes)
+    }
+    return byHole
+  }
+
+  if (!entity.event_team_id) return byHole
+  const teamId = entity.event_team_id
+
+  const teamBall = snapshot.teamScores.filter(
+    (s) => s.event_team_id === teamId && holeIds.has(s.event_hole_id),
+  )
+  if (teamBall.length > 0) {
+    for (const score of teamBall) byHole.set(score.event_hole_id, score.gross_strokes)
+    return byHole
+  }
+
+  const memberEntryIds = new Set(
+    snapshot.teamMembers
+      .filter((m) => m.event_team_id === teamId)
+      .map((m) => m.event_entry_id),
+  )
+  for (const score of snapshot.individualScores) {
+    if (!memberEntryIds.has(score.event_entry_id)) continue
+    if (!holeIds.has(score.event_hole_id)) continue
+    const current = byHole.get(score.event_hole_id)
+    if (score.gross_strokes === null) {
+      if (current === undefined) byHole.set(score.event_hole_id, null)
+      continue
+    }
+    if (current === undefined || current === null || score.gross_strokes < current) {
+      byHole.set(score.event_hole_id, score.gross_strokes)
+    }
+  }
+  return byHole
+}
+
+/**
+ * A match side's unrounded Course Handicap, which §8.6 normalizes from the
+ * lowest of the two. Teams carry a frozen team handicap; individuals carry the
+ * exact unrounded value computed at publish.
+ */
+function matchSideCourseHandicap(
+  snapshot: ScoringSnapshot,
+  entity: { event_entry_id: string | null; event_team_id: string | null },
+): Rational | null {
+  if (entity.event_entry_id) {
+    const entry = snapshot.entries.find((e) => e.id === entity.event_entry_id)
+    if (!entry || entry.course_handicap_unrounded === null) {
+      return entry?.playing_handicap === null || entry?.playing_handicap === undefined
+        ? null
+        : rational(entry.playing_handicap)
+    }
+    return rational(
+      Math.round(entry.course_handicap_unrounded * 1_000_000),
+      1_000_000,
+    )
+  }
+  if (entity.event_team_id) {
+    const team = snapshot.teams.find((t) => t.id === entity.event_team_id)
+    if (!team || team.playing_handicap === null) return null
+    return rational(team.playing_handicap)
+  }
+  return null
 }
 
 function teamScoresFor(
@@ -358,10 +448,17 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
           break
         }
 
+        // Shamble joins these two deliberately: §8.11 says that after the
+        // selected drive players complete their own balls and the hole is
+        // scored "as best k of m or team aggregate using explicit individual
+        // hole scores" — precisely this path. It needs no engine of its own.
         case 'best_k':
+        case 'shamble':
         case 'aggregate': {
-          if (rules.format === 'aggregate' && rules.team.scoreSource !== 'individual') {
-            throw new RangeError('team aggregate requires individual member scores')
+          if (rules.format !== 'best_k' && rules.team.scoreSource !== 'individual') {
+            throw new RangeError(
+              `${rules.format} requires individual member scores`,
+            )
           }
           const teams = entities
             .filter((e) => e.event_team_id)
@@ -389,7 +486,13 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
             teams,
             phase,
           }
-          const result = rules.format === 'aggregate'
+          // "All scores count" is the aggregate engine; anything narrower is
+          // best-ball selection. A shamble organizer picks either by setting
+          // bestK, so the format alone does not decide.
+          const countsEveryMember =
+            rules.format === 'aggregate' ||
+            (rules.format === 'shamble' && rules.team.bestK === rules.team.teamSize)
+          const result = countsEveryMember
             ? calculateTeamAggregate({
                 ...commonInput,
                 teamSize: rules.team.teamSize,
@@ -460,6 +563,15 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
             displayPrimary: `${r.points} pts`,
             status: r.status,
             detail: {},
+          }))
+          // Per-hole points drive the scorecard and are the values §8.15
+          // counts back on for a points competition.
+          holeResults = result.holePoints.map((h) => ({
+            entityId: entityByEntry.get(h.entryId) ?? h.entryId,
+            eventHoleId: h.holeId,
+            relativeToPar: h.relation,
+            provisional: h.provisional,
+            detail: { points: h.points },
           }))
           break
         }
@@ -644,12 +756,182 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
           break
         }
 
+        case 'match': {
+          // Pairings live in `matches`; each side is a competition_entity, so
+          // one code path covers individual, best-ball, and team-ball matches
+          // (§8.6). One projection row per SIDE per match carries that match's
+          // state, because a player in a bracket has a standing per match.
+          const entityById = new Map(entities.map((e) => [e.id, e]))
+          const pairings = snapshot.matches.filter(
+            (m) => m.competition_id === competition.id,
+          )
+          if (pairings.length === 0) {
+            warnings.push({
+              code: 'MATCH_NO_PAIRINGS',
+              message:
+                'No match pairings exist for this competition; publish creates ' +
+                'them before scoring can produce standings.',
+            })
+          }
+
+          const allowance = rational(
+            Math.round(rules.handicap.allowance * 1_000_000),
+            1_000_000,
+          )
+          // The WHS default token maps to the association profile, matching
+          // competitionPlayingHandicap above.
+          const rounding: RoundingProfile =
+            rules.handicap.rounding === 'half_up_toward_positive_infinity'
+              ? { kind: 'usga_whs_2024' }
+              : rules.handicap.rounding
+
+          for (const pairing of pairings) {
+            const a = pairing.side_a_entity_id
+              ? entityById.get(pairing.side_a_entity_id)
+              : undefined
+            const b = pairing.side_b_entity_id
+              ? entityById.get(pairing.side_b_entity_id)
+              : undefined
+            if (!a || !b) {
+              // A bye or an unfilled bracket slot: nothing to compute, and
+              // inventing a walkover result is the Committee's call.
+              continue
+            }
+
+            const grossA = matchSideGrossByHole(snapshot, a, holeIds)
+            const grossB = matchSideGrossByHole(snapshot, b, holeIds)
+
+            // §8.6 handicap match play: normalize from the LOWER unrounded
+            // Course Handicap, apply the match allowance, round once, then
+            // allocate the positive difference by stroke index.
+            let strokesA = new Map<string, number>()
+            let strokesB = new Map<string, number>()
+            if (metric === 'net') {
+              const chA = matchSideCourseHandicap(snapshot, a)
+              const chB = matchSideCourseHandicap(snapshot, b)
+              if (chA === null || chB === null) {
+                warnings.push({
+                  code: 'MATCH_NET_HANDICAP_MISSING',
+                  message:
+                    `Match '${pairing.id}' cannot be scored net because a side ` +
+                    'has no frozen Course Handicap; it is shown gross.',
+                })
+              } else {
+                const allocation = matchStrokeAllocation({
+                  courseHandicapA: chA,
+                  courseHandicapB: chB,
+                  allowance,
+                  rounding,
+                  holes,
+                })
+                strokesA = allocation.strokesA
+                strokesB = allocation.strokesB
+              }
+            }
+
+            const holeInputs: MatchHoleInput[] = holes.map((hole) => {
+              const rawA = grossA.get(hole.id) ?? null
+              const rawB = grossB.get(hole.id) ?? null
+              return {
+                holeId: hole.id,
+                a: rawA === null ? null : rawA - (strokesA.get(hole.id) ?? 0),
+                b: rawB === null ? null : rawB - (strokesB.get(hole.id) ?? 0),
+              }
+            })
+
+            const conceded =
+              pairing.status === 'conceded' && pairing.winner_entity_id
+                ? {
+                    winner: (pairing.winner_entity_id === a.id ? 'a' : 'b') as 'a' | 'b',
+                  }
+                : undefined
+
+            const state = calculateMatch({
+              holes,
+              holeInputs,
+              extraHolesAllowed: false,
+              ...(conceded ? { matchConcession: conceded } : {}),
+            })
+
+            if (state.status === 'in_progress') provisional = true
+
+            const sideRow = (
+              entityId: string,
+              opponentId: string,
+              side: 'a' | 'b',
+            ): ProjectionRow => {
+              const up = side === 'a' ? state.holesUp : -state.holesUp
+              const won = state.winner !== null && state.winner === side
+              const lost = state.winner !== null && state.winner !== side
+              return {
+                entityId,
+                // Bracket standings are not a stroke leaderboard; ordering is
+                // by bracket position, so rank stays null rather than implying
+                // a field ranking that does not exist.
+                rank: null,
+                isTied: false,
+                thru: state.outcomes.filter((o) => o.winner !== null).length,
+                resultPrimary: up,
+                resultSecondary: state.holesRemaining,
+                displayPrimary: state.display,
+                status:
+                  state.status === 'in_progress'
+                    ? 'provisional'
+                    : 'complete',
+                detail: {
+                  matchId: pairing.id,
+                  opponentEntityId: opponentId,
+                  matchStatus: state.status,
+                  holesUp: up,
+                  holesRemaining: state.holesRemaining,
+                  dormie: state.dormie,
+                  outcome: won ? 'won' : lost ? 'lost' : state.status === 'halved' ? 'halved' : 'in_progress',
+                  ...(pairing.bracket_position === null
+                    ? {}
+                    : { bracketPosition: pairing.bracket_position }),
+                },
+              }
+            }
+
+            rows.push(sideRow(a.id, b.id, 'a'))
+            rows.push(sideRow(b.id, a.id, 'b'))
+
+            for (const outcome of state.outcomes) {
+              if (outcome.winner === null) continue
+              const rawA = grossA.get(outcome.holeId) ?? null
+              const rawB = grossB.get(outcome.holeId) ?? null
+              holeResults.push({
+                entityId: a.id,
+                eventHoleId: outcome.holeId,
+                gross: rawA,
+                matchResult:
+                  outcome.winner === 'half' ? 'half' : outcome.winner === 'a' ? 'win' : 'loss',
+                detail: { matchId: pairing.id },
+              })
+              holeResults.push({
+                entityId: b.id,
+                eventHoleId: outcome.holeId,
+                gross: rawB,
+                matchResult:
+                  outcome.winner === 'half' ? 'half' : outcome.winner === 'b' ? 'win' : 'loss',
+                detail: { matchId: pairing.id },
+              })
+            }
+          }
+          break
+        }
+
         default: {
-          // Match and shamble calculations still need their format-specific
-          // snapshot wiring (pairings brackets and shamble score sources).
+          // Every format in the rules_json union is wired above, so this is an
+          // exhaustiveness guard rather than a deferral. `never` makes adding a
+          // format to the union without wiring it a compile error, not a
+          // silently provisional leaderboard.
+          const unwired: never = rules
           warnings.push({
-            code: 'ENGINE_FORMAT_DEFERRED',
-            message: `format '${rules.format}' projection wiring is deferred to a later phase`,
+            code: 'ENGINE_FORMAT_UNWIRED',
+            message:
+              `format '${(unwired as { format?: string }).format ?? 'unknown'}' ` +
+              'has no projection wiring',
           })
           provisional = true
         }
@@ -670,6 +952,69 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
         holeResults: [],
       })
       continue
+    }
+
+    // ── Countback (§8.15) ────────────────────────────────────────────────
+    // Applied here rather than inside each engine so one implementation of
+    // the rule serves every rankable format. Match play is excluded: a
+    // bracket has no shared rank to separate, and skins awards per hole.
+    if (rules.ties.mode === 'countback' && rules.ties.sequence.length > 0) {
+      if (rules.format === 'match' || rules.format === 'skins') {
+        warnings.push({
+          code: 'COUNTBACK_NOT_APPLICABLE',
+          message: `Countback does not apply to '${rules.format}' and was ignored.`,
+        })
+      } else {
+        const pointsFormat = rules.metric === 'points' || rules.format === 'stableford'
+        const byEntity = new Map<string, Array<number | null>>()
+        const holeOrder = holes.map((h) => h.id)
+        const indexOfHole = new Map(holeOrder.map((id, i) => [id, i]))
+
+        for (const result of holeResults) {
+          const position = indexOfHole.get(result.eventHoleId)
+          if (position === undefined) continue
+          let values = byEntity.get(result.entityId)
+          if (!values) {
+            values = Array.from({ length: holeOrder.length }, () => null)
+            byEntity.set(result.entityId, values)
+          }
+          const points = (result.detail as { points?: number } | undefined)?.points
+          const value = pointsFormat
+            ? points ?? null
+            : metric === 'net'
+              ? result.net ?? result.gross ?? null
+              : result.gross ?? null
+          values[position] = value === undefined ? null : value
+        }
+
+        if (byEntity.size === 0) {
+          // No per-hole values exist for this format (Par/Bogey publishes none
+          // today), so a countback here would be a no-op presented as applied.
+          warnings.push({
+            code: 'COUNTBACK_NO_HOLE_VALUES',
+            message:
+              `Countback is configured but '${rules.format}' publishes no ` +
+              'per-hole values to count back on; ties stand.',
+          })
+        } else {
+          const applied = applyCountback(
+            rows.map((r) => ({ entityId: r.entityId, rank: r.rank, isTied: r.isTied })),
+            byEntity,
+            { mode: rules.ties.mode, sequence: rules.ties.sequence },
+            pointsFormat ? 'desc' : 'asc',
+          )
+          const placementById = new Map(applied.rows.map((r) => [r.entityId, r]))
+          rows = rows.map((row) => {
+            const placement = placementById.get(row.entityId)
+            return placement
+              ? { ...row, rank: placement.rank, isTied: placement.isTied }
+              : row
+          })
+          warnings.push(
+            ...applied.warnings.map((w) => ({ code: w.code, message: w.message })),
+          )
+        }
+      }
     }
 
     competitions.push({
