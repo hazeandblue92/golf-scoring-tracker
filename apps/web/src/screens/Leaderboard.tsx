@@ -43,6 +43,7 @@ export function Leaderboard() {
           return {
             ...row,
             entryId: entity?.event_entry_id ?? null,
+            teamId: entity?.event_team_id ?? null,
             name: entity?.event_entry_id
               ? entryNames.get(entity.event_entry_id) ?? 'Player'
               : teamNames.get(entity?.event_team_id ?? '') ?? 'Team',
@@ -70,7 +71,7 @@ export function Leaderboard() {
   window.localStorage.setItem('gtt.activeCompetitionId', competition.id);
   const lag = event.scoring_revision - (projection?.event_revision ?? 0);
   const resultLabel = competition.metric === 'points' ? 'Points' : competition.metric === 'net' ? 'Net' : 'Gross';
-  const entityLabel = competition.format === 'best_k' ? 'Team' : 'Player';
+  const entityLabel = ['best_k', 'aggregate', 'scramble', 'foursomes', 'greensomes', 'chapman', 'shamble'].includes(competition.format) ? 'Team' : 'Player';
 
   return (
     <div className="screen board-screen">
@@ -84,10 +85,21 @@ export function Leaderboard() {
       <div className="leaderboard" role="table" aria-label={`${competition.name} standings`}>
         <div className="leaderboard-head" role="row"><span role="columnheader">Rank</span><span role="columnheader">{entityLabel}</span><span role="columnheader">Thru</span><span role="columnheader">{resultLabel}</span></div>
         {rows.length === 0 ? <div className="empty-state"><h2>Waiting for the first score</h2><p>This board refreshes automatically and also polls if live updates are interrupted.</p></div> : rows.map((row) => {
-          const content = <><span role="cell" className="rank">{row.rank === null ? '—' : `${row.is_tied ? 'T' : ''}${row.rank}`}</span><span role="cell"><strong>{row.name}</strong><small>{row.status}</small></span><span role="cell">{row.thru ?? '—'}</span><span role="cell" className="result">{row.result_primary ?? '—'}</span></>;
-          return row.entryId
-            ? <Link className="leaderboard-row" role="row" key={row.entity_id} to={`/events/${eventId}/scorecard/${row.entryId}`}>{content}</Link>
-            : <div className="leaderboard-row" role="row" key={row.entity_id}>{content}</div>;
+          const scorecardPath = row.entryId
+            ? `/events/${eventId}/scorecard/${row.entryId}`
+            : row.teamId
+              ? `/events/${eventId}/team-scorecard/${row.teamId}`
+              : null;
+          return <div className="leaderboard-row" role="row" key={row.entity_id}>
+            <span role="cell" className="rank">{row.rank === null ? '—' : `${row.is_tied ? 'T' : ''}${row.rank}`}</span>
+            <span role="cell">
+              {scorecardPath
+                ? <Link className="leaderboard-name-link" to={scorecardPath}><strong>{row.name}</strong><small>{row.status}</small></Link>
+                : <><strong>{row.name}</strong><small>{row.status}</small></>}
+            </span>
+            <span role="cell">{row.thru ?? '—'}</span>
+            <span role="cell" className="result">{row.result_primary ?? '—'}</span>
+          </div>;
         })}
       </div>
       <footer className="board-footer">{projection ? `Updated ${new Intl.DateTimeFormat(undefined, { timeStyle: 'medium' }).format(new Date(projection.calculated_at))}` : 'Projection pending'}{competition.final_result_hash && <code title="Final result hash">{competition.final_result_hash.slice(0, 12)}…</code>}</footer>

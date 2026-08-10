@@ -9,6 +9,14 @@ export default defineConfig({
   timeout: 120_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,
+  // Every project drives the SAME local Supabase stack and creates real
+  // accounts, leagues, and events through it. `fullyParallel: false` only
+  // serializes within a file — separate files and the four browser projects
+  // still fan out across workers, which races on that shared database and
+  // multiplies load on one container set until requests fail outright. These
+  // are shared-backend journey tests, so they are serial everywhere, not just
+  // in CI.
+  workers: 1,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: 'http://127.0.0.1:4173',
@@ -27,6 +35,8 @@ export default defineConfig({
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+    { name: 'webkit', use: { ...devices['Desktop Safari'] } },
     { name: 'mobile-chromium', use: { ...devices['Pixel 7'] } },
   ],
 });

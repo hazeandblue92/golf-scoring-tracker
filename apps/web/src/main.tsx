@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { RouterProvider } from 'react-router/dom';
 
 import './reset.css';
+import { AppErrorBoundary } from './components/AppErrorBoundary.tsx';
 import { SessionProvider } from './lib/session.tsx';
 import { router } from './router.tsx';
 
@@ -16,12 +17,14 @@ if (container === null) {
 
 createRoot(container).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <SessionProvider>
-        <Suspense fallback={<p className="route-loading" role="status">Loading…</p>}>
-          <RouterProvider router={router} />
-        </Suspense>
-      </SessionProvider>
-    </QueryClientProvider>
+    <AppErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <SessionProvider>
+          <Suspense fallback={<p className="route-loading" role="status">Loading…</p>}>
+            <RouterProvider router={router} />
+          </Suspense>
+        </SessionProvider>
+      </QueryClientProvider>
+    </AppErrorBoundary>
   </StrictMode>,
 );

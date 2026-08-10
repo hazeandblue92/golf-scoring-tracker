@@ -111,6 +111,17 @@ describe('rulesJsonSchema', () => {
     expect(rulesJsonSchema.safeParse(scramble).success).toBe(true)
   })
 
+  it('rejects scramble rules without one team-ball weight per member', () => {
+    expect(rulesJsonSchema.safeParse({
+      ...scramble,
+      team: { ...scramble.team, scoreSource: 'individual' },
+    }).success).toBe(false)
+    expect(rulesJsonSchema.safeParse({
+      ...scramble,
+      team: { ...scramble.team, weights: [0.35, 0.15] },
+    }).success).toBe(false)
+  })
+
   it('accepts explicit hole-level all-scores-count team aggregate rules', () => {
     expect(rulesJsonSchema.safeParse(aggregate).success).toBe(true)
   })

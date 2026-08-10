@@ -1,0 +1,34 @@
+name: Operations maintenance
+
+on:
+  schedule:
+    - cron: '41 5 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capacity-and-retention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+    steps:
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install --yes postgresql-client
+      - name: Check free-profile database capacity
+        run: |
+          set -euo pipefail
+          used=$(psql "$SUPABASE_DB_URL" --no-psqlrc -Atc "select pg_database_size(current_database())")
+          echo "Database uses $used of 524288000 bytes."
+          if [ "$used" -ge 471859200 ]; then
+            echo "::error::Database usage is at or above the 90% action threshold."
+            exit 1
+          elif [ "$used" -ge 393216000 ]; then
+            echo "::warning::Database usage is at or above the 75% action threshold."
+          elif [ "$used" -ge 314572800 ]; then
+            echo "::warning::Database usage is at or above the 60% warning threshold."
+          fi
+      - name: Prune expired sanitized error aggregates
+        run: psql "$SUPABASE_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -c "select public.prune_phase4_error_events(now() - interval '30 days')"

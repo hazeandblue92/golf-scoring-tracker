@@ -1,0 +1,73 @@
+name: Encrypted database backup
+
+on:
+  schedule:
+    - cron: '17 4 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: encrypted-database-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      AGE_BACKUP_RECIPIENT: ${{ secrets.AGE_BACKUP_RECIPIENT }}
+      BACKUP_WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      BACKUP_DIR: ${{ runner.temp }}/gtt-encrypted-backup
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install PostgreSQL client and age
+        run: sudo apt-get update && sudo apt-get install --yes postgresql-client age
+      - name: Record backup start
+        id: record
+        run: echo "id=$(node scripts/record-backup-run.mjs start)" >> "$GITHUB_OUTPUT"
+      - name: Create, encrypt, and verify backup
+        id: create
+        env:
+          BACKUP_RUN_ID: ${{ steps.record.outputs.id }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$BACKUP_DIR"
+          pg_dump "$SUPABASE_DB_URL" --format=custom --compress=9 --no-owner --no-privileges --schema=public --schema=auth --file="$BACKUP_DIR/database.dump"
+          BACKUP_RUN_ID="$BACKUP_RUN_ID" BACKUP_WORKFLOW_URL="$BACKUP_WORKFLOW_URL" node --input-type=module -e "import{readdirSync,writeFileSync}from'node:fs';const m=readdirSync('supabase/migrations').filter(x=>x.endsWith('.sql')).sort();writeFileSync(process.env.BACKUP_DIR+'/manifest.json',JSON.stringify({createdAt:new Date().toISOString(),backupRunId:process.env.BACKUP_RUN_ID,workflowRunUrl:process.env.BACKUP_WORKFLOW_URL,schemas:['auth','public'],latestMigration:m.at(-1),migrationCount:m.length},null,2)+'\n')"
+          tar -czf "$BACKUP_DIR/backup.tar.gz" -C "$BACKUP_DIR" database.dump manifest.json
+          age --recipient "$AGE_BACKUP_RECIPIENT" --output "$BACKUP_DIR/backup.tar.gz.age" "$BACKUP_DIR/backup.tar.gz"
+          sha256sum "$BACKUP_DIR/backup.tar.gz.age" > "$BACKUP_DIR/backup.tar.gz.age.sha256"
+          checksum=$(cut -d ' ' -f1 "$BACKUP_DIR/backup.tar.gz.age.sha256")
+          size=$(stat -c%s "$BACKUP_DIR/backup.tar.gz.age")
+          test "$size" -le 52428800
+          rm "$BACKUP_DIR/database.dump" "$BACKUP_DIR/backup.tar.gz"
+          test ! -e "$BACKUP_DIR/database.dump"
+          test ! -e "$BACKUP_DIR/backup.tar.gz"
+          echo "checksum=$checksum" >> "$GITHUB_OUTPUT"
+          echo "size=$size" >> "$GITHUB_OUTPUT"
+      - name: Upload encrypted artifact and evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: encrypted-database-backup-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/gtt-encrypted-backup/backup.tar.gz.age
+            ${{ runner.temp }}/gtt-encrypted-backup/backup.tar.gz.age.sha256
+            ${{ runner.temp }}/gtt-encrypted-backup/manifest.json
+          retention-days: 30
+          if-no-files-found: error
+      - name: Record backup success
+        env:
+          BACKUP_CHECKSUM: ${{ steps.create.outputs.checksum }}
+          BACKUP_SIZE_BYTES: ${{ steps.create.outputs.size }}
+        run: node scripts/record-backup-run.mjs finish "${{ steps.record.outputs.id }}" succeeded
+      - name: Record backup failure
+        if: ${{ failure() && steps.record.outputs.id != '' }}
+        run: node scripts/record-backup-run.mjs finish "${{ steps.record.outputs.id }}" failed

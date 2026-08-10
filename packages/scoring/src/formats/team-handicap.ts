@@ -95,14 +95,21 @@ export function scrambleTeamHandicap(
   weights: Rational[],
   rounding: RoundingProfile,
 ): TeamHandicapResult {
+  if (courseHandicaps.length < 2 || courseHandicaps.length > 4) {
+    throw new RangeError(
+      `scramble requires two, three, or four course handicaps, got ${courseHandicaps.length}`,
+    )
+  }
   if (courseHandicaps.length !== weights.length) {
     throw new RangeError(
       `scramble weight count ${weights.length} does not match ` +
         `course handicap count ${courseHandicaps.length}`,
     )
   }
-  if (courseHandicaps.length === 0) {
-    throw new RangeError('scramble requires at least one course handicap')
+  for (const weight of weights) {
+    if (compare(weight, ZERO) < 0 || compare(weight, rational(1)) > 0) {
+      throw new RangeError(`scramble weights must be between 0 and 1, got ${weight.num}/${weight.den}`)
+    }
   }
   // Ascending by exact rational value: a plus handicap (negative internally)
   // sorts below any positive handicap and pairs with the largest weight.

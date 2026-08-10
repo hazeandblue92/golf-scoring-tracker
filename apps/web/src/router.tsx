@@ -57,6 +57,7 @@ export const router = createBrowserRouter([
               { path: 'events/:eventId/rules', Component: EventRules },
               { path: 'events/:eventId/score', Component: ScoreEntry },
               { path: 'events/:eventId/scorecard/:entryId', Component: Scorecard },
+              { path: 'events/:eventId/team-scorecard/:teamId', Component: Scorecard },
               {
                 path: 'events/:eventId/leaderboards/:competitionId',
                 Component: Leaderboard,

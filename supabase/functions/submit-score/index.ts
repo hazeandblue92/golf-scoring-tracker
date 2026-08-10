@@ -28,6 +28,175 @@ import {
 } from '../_shared/http.ts'
 
 const MAX_PUBLISH_ATTEMPTS = 3
+const PROJECTION_DEBOUNCE_MS = 650
+const PROJECTION_LEASE_MS = 15_000
+
+declare const EdgeRuntime: {
+  waitUntil(promise: Promise<unknown>): void
+}
+
+type ServiceClient = ReturnType<typeof serviceClient>
+type ProjectionClaim = {
+  status: 'claimed' | 'wait' | 'pending' | 'unavailable'
+  leaseToken: string
+}
+
+async function claimProjectionPublish(
+  service: ServiceClient,
+  eventId: string,
+  revision: number,
+  existingToken?: string,
+): Promise<ProjectionClaim> {
+  const leaseToken = existingToken ?? crypto.randomUUID()
+  const { data, error } = await service.rpc('claim_projection_publish', {
+    p_event_id: eventId,
+    p_revision: revision,
+    p_lease_token: leaseToken,
+  })
+  if (error || !['claimed', 'wait', 'pending'].includes(String(data))) {
+    return { status: 'unavailable', leaseToken }
+  }
+  return {
+    status: data as 'claimed' | 'wait' | 'pending',
+    leaseToken,
+  }
+}
+
+async function releaseProjectionPublish(
+  service: ServiceClient,
+  eventId: string,
+  revision: number,
+  leaseToken: string,
+): Promise<boolean> {
+  const { data, error } = await service.rpc('release_projection_publish', {
+    p_event_id: eventId,
+    p_revision: revision,
+    p_lease_token: leaseToken,
+  })
+  return !error && data === true
+}
+
+async function renewProjectionPublishLease(
+  service: ServiceClient,
+  eventId: string,
+  leaseToken: string,
+): Promise<boolean> {
+  const { data, error } = await service.rpc('renew_projection_publish_lease', {
+    p_event_id: eventId,
+    p_lease_token: leaseToken,
+  })
+  return !error && data === true
+}
+
+async function projectionsAreCurrent(
+  service: ServiceClient,
+  eventId: string,
+): Promise<boolean> {
+  const { data, error } = await service.rpc('event_projections_current', {
+    p_event_id: eventId,
+  })
+  return !error && data === true
+}
+
+async function publishLatestProjections(
+  service: ServiceClient,
+  eventId: string,
+  correlationId: string,
+  leaseToken: string,
+): Promise<number | null> {
+  for (let attempt = 0; attempt < MAX_PUBLISH_ATTEMPTS; attempt++) {
+    let snapshot
+    try {
+      snapshot = await loadScoringSnapshot(service, eventId)
+    } catch (err) {
+      console.error(
+        JSON.stringify({ correlationId, stage: 'snapshot', message: String(err) }),
+      )
+      return null
+    }
+
+    const payload = buildProjections(snapshot)
+    if (!await renewProjectionPublishLease(service, eventId, leaseToken)) {
+      return null
+    }
+    const { data: published, error: publishError } = await service.rpc(
+      'publish_projections',
+      {
+        p_event_id: eventId,
+        p_revision: snapshot.event.scoring_revision,
+        p_result: payload,
+      },
+    )
+
+    if (publishError) {
+      console.error(
+        JSON.stringify({ correlationId, stage: 'publish', message: publishError.message }),
+      )
+      return null
+    }
+
+    const pub = published as { status: string; event_revision?: number }
+    if (pub.status === 'published') {
+      return pub.event_revision ?? snapshot.event.scoring_revision
+    }
+  }
+  return null
+}
+
+function scheduleProjectionRepair(
+  service: ServiceClient,
+  eventId: string,
+  revision: number,
+  correlationId: string,
+  delayMs = PROJECTION_DEBOUNCE_MS,
+  waiterToken?: string,
+): void {
+  if (typeof EdgeRuntime === 'undefined') return
+  EdgeRuntime.waitUntil((async () => {
+    await new Promise((resolve) => setTimeout(resolve, delayMs))
+    if (await projectionsAreCurrent(service, eventId)) return
+    const claim = await claimProjectionPublish(
+      service,
+      eventId,
+      revision,
+      waiterToken,
+    )
+    if (claim.status === 'wait') {
+      // This caller is the single elected crash fallback. If the current
+      // owner never releases, retry just beyond lease expiry.
+      scheduleProjectionRepair(
+        service,
+        eventId,
+        revision,
+        correlationId,
+        PROJECTION_LEASE_MS + PROJECTION_DEBOUNCE_MS,
+        claim.leaseToken,
+      )
+      return
+    }
+    if (claim.status !== 'claimed') return
+    let publishedRevision = revision
+    let pending = false
+    try {
+      publishedRevision = await publishLatestProjections(
+        service,
+        eventId,
+        correlationId,
+        claim.leaseToken,
+      ) ?? revision
+    } finally {
+      pending = await releaseProjectionPublish(
+        service,
+        eventId,
+        publishedRevision,
+        claim.leaseToken,
+      )
+    }
+    if (pending) {
+      scheduleProjectionRepair(service, eventId, publishedRevision, correlationId)
+    }
+  })())
+}
 
 Deno.serve(async (req: Request) => {
   const correlationId = newCorrelationId()
@@ -124,41 +293,41 @@ Deno.serve(async (req: Request) => {
   const service = serviceClient()
   let projectionRevision: number | null = null
 
-  for (let attempt = 0; attempt < MAX_PUBLISH_ATTEMPTS; attempt++) {
-    let snapshot
+  const eventRevision = result.event_revision ?? 0
+  const projectionClaim = await claimProjectionPublish(
+    service,
+    request.eventId,
+    eventRevision,
+  )
+  if (projectionClaim.status === 'claimed') {
+    let pending = false
     try {
-      snapshot = await loadScoringSnapshot(service, request.eventId)
-    } catch (err) {
-      // The score is durable; projections can be repaired later.
-      console.error(
-        JSON.stringify({ correlationId, stage: 'snapshot', message: String(err) }),
+      projectionRevision = await publishLatestProjections(
+        service,
+        request.eventId,
+        correlationId,
+        projectionClaim.leaseToken,
       )
-      break
+    } finally {
+      pending = await releaseProjectionPublish(
+        service,
+        request.eventId,
+        projectionRevision ?? eventRevision,
+        projectionClaim.leaseToken,
+      )
     }
-
-    const payload = buildProjections(snapshot)
-    const { data: published, error: publishError } = await service.rpc(
-      'publish_projections',
-      {
-        p_event_id: request.eventId,
-        p_revision: snapshot.event.scoring_revision,
-        p_result: payload,
-      },
+    if (pending) {
+      scheduleProjectionRepair(service, request.eventId, eventRevision, correlationId)
+    }
+  } else if (projectionClaim.status === 'wait') {
+    scheduleProjectionRepair(
+      service,
+      request.eventId,
+      eventRevision,
+      correlationId,
+      PROJECTION_LEASE_MS + PROJECTION_DEBOUNCE_MS,
+      projectionClaim.leaseToken,
     )
-
-    if (publishError) {
-      console.error(
-        JSON.stringify({ correlationId, stage: 'publish', message: publishError.message }),
-      )
-      break
-    }
-
-    const pub = published as { status: string; event_revision?: number }
-    if (pub.status === 'published') {
-      projectionRevision = pub.event_revision ?? snapshot.event.scoring_revision
-      break
-    }
-    // 'stale': a newer mutation landed mid-calculation — recompute (§7.2).
   }
 
   const status =

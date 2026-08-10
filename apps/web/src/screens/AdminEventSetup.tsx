@@ -5,8 +5,12 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { publishEvent, saveEventDraft } from '../lib/phase1.ts';
 import { getSupabaseClient } from '../lib/supabase.ts';
 
-type CompetitionPreset = 'individual_gross' | 'two_person_throwdown';
-type TeamDraft = { name: string; participantIds: [string, string] };
+type CompetitionPreset =
+  | 'individual_gross'
+  | 'two_person_throwdown'
+  | 'three_player_scramble'
+  | 'four_player_scramble';
+type TeamDraft = { name: string; participantIds: string[] };
 type HandicapRecord = {
   id: string;
   value: number;
@@ -64,8 +68,8 @@ export function AdminEventSetup() {
           name: team.name,
           participantIds: team.event_team_members
             .toSorted((a, b) => a.position - b.position)
-            .map((member) => relationValue(member.event_entries)?.participant_id ?? '') as [string, string],
-        })).filter((team) => team.participantIds.length === 2 && team.participantIds.every(Boolean));
+            .map((member) => relationValue(member.event_entries)?.participant_id ?? ''),
+        })).filter((team) => team.participantIds.length >= 2 && team.participantIds.length <= 4 && team.participantIds.every(Boolean));
       }
       const teeSets = (courses ?? []).flatMap((course) => course.course_layouts.flatMap((layout) => layout.tee_sets.filter((tee) => tee.status === 'active').map((tee) => ({ ...tee, label: `${course.name} · ${layout.name} · ${tee.name}` }))));
       return { leagueId, league: leagues?.find((league) => league.id === leagueId), seasons: seasons ?? [], participants: participants ?? [], teeSets, existing, round, entryParticipantIds, existingTeams };
@@ -78,8 +82,15 @@ export function AdminEventSetup() {
   const existing = data.existing;
   const initialIds = data.entryParticipantIds.length ? data.entryParticipantIds : data.participants.map((participant) => participant.id);
   const activeIds = selectedIds ?? initialIds;
-  const activePreset = preset ?? (data.existingTeams.length > 0 || routeEventId === 'new' ? 'two_person_throwdown' : 'individual_gross');
-  const activeTeams = teamDrafts ?? (data.existingTeams.length ? data.existingTeams : pairParticipants(activeIds));
+  const activePreset = preset ?? inferExistingPreset(data.existingTeams)
+    ?? (routeEventId === 'new' ? 'two_person_throwdown' : 'individual_gross');
+  const teamSize = teamSizeForPreset(activePreset);
+  const effectiveTeamSize = teamSize ?? 2;
+  const isTeamEvent = teamSize !== null;
+  const isScramble = activePreset === 'three_player_scramble' || activePreset === 'four_player_scramble';
+  const activeTeams = teamDrafts ?? (data.existingTeams.length
+    ? data.existingTeams
+    : groupParticipants(activeIds, effectiveTeamSize));
   const defaultStart = existing?.starts_at ? localDateTime(existing.starts_at) : localDateTime(new Date(Date.now() + 7 * 86400000).toISOString());
   const activeStartsAt = selectedStartsAt ?? defaultStart;
   const activeTeeSetId = selectedTeeSetId ?? data.round?.source_tee_set_id ?? data.teeSets[0]?.id ?? '';
@@ -100,13 +111,37 @@ export function AdminEventSetup() {
       bestBallPlayingHandicap: courseHandicap === null ? null : roundPlayingHandicap(courseHandicap, 0.85),
     };
   });
-  const pairingsValid = activePreset === 'individual_gross' || (
-    activeIds.length >= 4
-    && activeIds.length % 4 === 0
-    && activeTeams.length % 2 === 0
-    && activeTeams.every((team) => team.name.trim() !== '' && team.participantIds.every(Boolean))
+  const weights = scrambleWeights(activePreset);
+  const scrambleTeamReview = weights === null ? [] : activeTeams.map((team) => {
+    const courseHandicaps = team.participantIds.map((participantId) =>
+      handicapReview.find((row) => row.participantId === participantId)?.courseHandicap ?? null);
+    const valid = courseHandicaps.every((value): value is number => value !== null);
+    const unrounded = valid
+      ? courseHandicaps.toSorted((left, right) => left - right)
+          .reduce((sum, value, index) => sum + value * (weights[index] ?? 0), 0)
+      : null;
+    return {
+      name: team.name,
+      unrounded,
+      playingHandicap: unrounded === null ? null : roundPlayingHandicap(unrounded, 1),
+    };
+  });
+  const teamsComplete = !isTeamEvent || activeTeams.every((team) =>
+    team.name.trim() !== ''
+    && team.participantIds.length === effectiveTeamSize
+    && team.participantIds.every(Boolean));
+  const assignments = activeTeams.flatMap((team) => team.participantIds);
+  const assignmentsUnique = new Set(assignments).size === assignments.length
+    && assignments.length === activeIds.length;
+  const pairingsValid = !isTeamEvent || (
+    activeTeams.length >= 2
+    && teamsComplete
+    && assignmentsUnique
+    && (activePreset !== 'two_person_throwdown'
+      ? activeIds.length % effectiveTeamSize === 0
+      : activeIds.length % 4 === 0 && activeTeams.length % 2 === 0)
   );
-  const handicapsValid = activePreset === 'individual_gross' || handicapReview.every((row) => row.handicap !== null);
+  const handicapsValid = !isTeamEvent || handicapReview.every((row) => row.handicap !== null);
 
   if (existing && existing.status !== 'draft') {
     return (
@@ -122,12 +157,12 @@ export function AdminEventSetup() {
     if (checked) nextSet.add(participantId); else nextSet.delete(participantId);
     const next = data.participants.filter((participant) => nextSet.has(participant.id)).map((participant) => participant.id);
     setSelectedIds(next);
-    setTeamDrafts(pairParticipants(next));
+    setTeamDrafts(groupParticipants(next, effectiveTeamSize));
     setSavedEventId(null);
   }
 
-  function updateTeamMember(teamIndex: number, slot: 0 | 1, participantId: string) {
-    const next = activeTeams.map((team) => ({ ...team, participantIds: [...team.participantIds] as [string, string] }));
+  function updateTeamMember(teamIndex: number, slot: number, participantId: string) {
+    const next = activeTeams.map((team) => ({ ...team, participantIds: [...team.participantIds] }));
     const previous = next[teamIndex]?.participantIds[slot] ?? '';
     for (const team of next) {
       const otherSlot = team.participantIds.indexOf(participantId);
@@ -160,7 +195,7 @@ export function AdminEventSetup() {
         participantIds: activeIds,
         scorerProfileIds: form.getAll('scorerProfileIds').map(String),
         competitionPreset: activePreset,
-        teams: activePreset === 'two_person_throwdown' ? activeTeams : [],
+        teams: isTeamEvent ? activeTeams : [],
       });
       setSavedEventId(result.eventId);
       setMessage('Draft saved. Server preflight passed and the event is ready to publish.');
@@ -182,31 +217,222 @@ export function AdminEventSetup() {
 
   return (
     <div className="screen builder-screen">
-      <header className="page-header page-header--split"><div><Link className="back-link" to="/dashboard">Back to dashboard</Link><h1>{existing ? `Set up ${existing.name}` : 'Create an event'}</h1><p>Build one shared scorecard into individual, best-ball, and skins results.</p></div>{existing?.status && <span className="status-badge">{existing.status.replaceAll('_', ' ')}</span>}</header>
+      <header className="page-header page-header--split">
+        <div>
+          <Link className="back-link" to="/dashboard">Back to dashboard</Link>
+          <h1>{existing ? `Set up ${existing.name}` : 'Create an event'}</h1>
+          <p>Choose the format first, then review the score source and handicap authority before publishing.</p>
+        </div>
+        {existing?.status && <span className="status-badge">{existing.status.replaceAll('_', ' ')}</span>}
+      </header>
       {error && <p className="form-message form-message--error" role="alert">{error}</p>}
       {message && <p className="form-message form-message--success" role="status">{message}</p>}
       <form className="builder-form" onSubmit={(event) => void save(event)}>
-        <section><div className="builder-step"><span>1</span><div><h2>Event basics</h2><p>Name the day and set the scoring window.</p></div></div><div className="form-grid"><div className="field field--wide"><label htmlFor="event-name">Event name</label><input id="event-name" name="name" defaultValue={existing?.name ?? ''} required minLength={3} maxLength={100} /></div><div className="field"><label htmlFor="season">Season</label><select id="season" name="seasonId" defaultValue={data.seasons.find((season) => season.status === 'active')?.id ?? data.seasons[0]?.id} required>{data.seasons.map((season) => <option key={season.id} value={season.id}>{season.name}</option>)}</select></div><div className="field"><label htmlFor="visibility">Visibility</label><select id="visibility" name="visibility" defaultValue={existing?.visibility ?? 'league'}><option value="league">League members</option><option value="public">Public</option><option value="organizers">Organizers only</option></select></div><div className="field"><label htmlFor="starts-at">Starts</label><input id="starts-at" name="startsAt" type="datetime-local" value={activeStartsAt} onChange={(event) => { setSelectedStartsAt(event.target.value); setSavedEventId(null); }} required /></div><div className="field"><label htmlFor="ends-at">Ends (optional)</label><input id="ends-at" name="endsAt" type="datetime-local" defaultValue={existing?.ends_at ? localDateTime(existing.ends_at) : ''} /></div><div className="field field--wide"><label htmlFor="timezone">Venue timezone</label><input id="timezone" name="timezone" defaultValue={existing?.timezone ?? data.league?.timezone ?? 'America/Detroit'} required /></div></div></section>
-        <section><div className="builder-step"><span>2</span><div><h2>Course and tee</h2><p>Publishing freezes this exact hole and handicap data.</p></div></div><div className="field"><label htmlFor="tee-set">Tee set</label><select id="tee-set" name="teeSetId" value={activeTeeSetId} onChange={(event) => { setSelectedTeeSetId(event.target.value); setSavedEventId(null); }} required>{data.teeSets.map((tee) => <option key={tee.id} value={tee.id}>{tee.label} · Par {tee.par} · {tee.course_rating}/{tee.slope_rating}</option>)}</select></div></section>
-        <section><div className="builder-step"><span>3</span><div><h2>Field and format</h2><p>Select the players, then confirm how the day competes.</p></div></div><div className="field competition-preset"><label htmlFor="competition-preset">Competition preset</label><select id="competition-preset" value={activePreset} onChange={(event) => { setPreset(event.target.value as CompetitionPreset); setSavedEventId(null); }}><option value="two_person_throwdown">Two-person throwdown · six competitions</option><option value="individual_gross">Individual gross · one competition</option></select><small>{activePreset === 'two_person_throwdown' ? 'Gross and net individual, best ball, and skins share every submitted score.' : 'A simple gross stroke-play event.'}</small></div><fieldset className="choice-list"><legend>Event field</legend>{data.participants.map((participant) => <label key={participant.id}><input type="checkbox" name="participantIds" value={participant.id} checked={activeIds.includes(participant.id)} onChange={(event) => toggleParticipant(participant.id, event.target.checked)} /><span><strong>{participant.display_name}</strong><small>{participant.profile_id ? 'Account linked' : 'Guest player'}</small></span></label>)}</fieldset>
-          {activePreset === 'two_person_throwdown' && <div className="handicap-review" aria-labelledby="handicap-review-title"><div className="section-heading"><div><h3 id="handicap-review-title">Handicap review</h3><p>Course Handicap stays unrounded; each competition rounds its own allowance.</p></div><span>{activeTeeSet?.name ?? 'Selected tee'}</span></div><div className="handicap-review-table" tabIndex={0} aria-label="Handicap review table, scroll horizontally for all columns"><table><thead><tr><th scope="col">Player</th><th scope="col">Source / index</th><th scope="col">Course Handicap</th><th scope="col">PH 100%</th><th scope="col">PH 85%</th></tr></thead><tbody>{handicapReview.map((row) => <tr key={row.participantId}><th scope="row">{row.name}</th><td>{row.handicap ? `${sourceLabel(row.handicap.source)} · ${formatHandicapIndex(Number(row.handicap.value))}` : <strong className="state-warning">Missing</strong>}</td><td>{row.courseHandicap === null ? '—' : row.courseHandicap.toFixed(6)}</td><td>{row.fullPlayingHandicap ?? '—'}</td><td>{row.bestBallPlayingHandicap ?? '—'}</td></tr>)}</tbody></table></div>{!handicapsValid && <p className="form-message form-message--warning">Add a current handicap record for every selected player before saving a net event.</p>}</div>}
-          {activePreset === 'two_person_throwdown' && <div className="team-pairings" aria-labelledby="team-pairings-title"><div className="section-heading"><div><h3 id="team-pairings-title">Two-person teams</h3><p>Each selected player appears once; every group contains exactly two teams.</p></div><span>{activeTeams.length} teams</span></div>{activeIds.length % 4 !== 0 && <p className="form-message form-message--warning">Select players in groups of four so every tee group has two complete teams.</p>}{activeTeams.map((team, teamIndex) => <div className="team-pairing" key={`${teamIndex}-${team.participantIds.join('-')}`}><label className="field"><span>Team name</span><input value={team.name} maxLength={80} onChange={(event) => { const next = [...activeTeams]; next[teamIndex] = { ...team, name: event.target.value }; setTeamDrafts(next); setSavedEventId(null); }} required /></label>{([0, 1] as const).map((slot) => <label className="field" key={slot}><span>Player {slot + 1}</span><select value={team.participantIds[slot]} onChange={(event) => updateTeamMember(teamIndex, slot, event.target.value)} required><option value="">Select player</option>{activeIds.map((participantId) => <option key={participantId} value={participantId}>{data.participants.find((participant) => participant.id === participantId)?.display_name ?? 'Player'}</option>)}</select></label>)}</div>)}</div>}
-          <fieldset className="choice-list choice-list--compact"><legend>Marker access (optional)</legend>{data.participants.filter((participant) => participant.profile_id).map((participant) => <label key={participant.id}><input type="checkbox" name="scorerProfileIds" value={participant.profile_id!} /><span><strong>{participant.display_name}</strong><small>Can score the entire field</small></span></label>)}</fieldset></section>
-        <section className="preflight"><div className="builder-step"><span>4</span><div><h2>Preflight and publish</h2><p>These checks are repeated in one server transaction.</p></div></div><ul>{activePreset === 'two_person_throwdown' && <><li>Every tee group contains two complete two-person teams</li><li>Every net player has a reviewed handicap source, Course Handicap, and competition Playing Handicap</li><li>Six simultaneous competitions use the same individual scorecards</li><li>Best-ball net applies 85% before choosing each hole’s contributor</li></>}<li>Tee par, rating, slope, and stroke indexes are complete</li><li>Course Handicap and immutable roster snapshots will be frozen</li></ul><div className="builder-actions"><button className="button button--secondary" type="submit" disabled={submitting || activeIds.length === 0 || !pairingsValid || !handicapsValid}>{submitting ? 'Working…' : 'Save draft'}</button><button className="button button--primary" type="button" onClick={() => void publish()} disabled={!savedEventId || submitting}>Publish and open scoring</button></div></section>
+        <section>
+          <div className="builder-step">
+            <span>1</span>
+            <div><h2>Event basics</h2><p>Name the day and set the scoring window.</p></div>
+          </div>
+          <div className="form-grid">
+            <div className="field field--wide"><label htmlFor="event-name">Event name</label><input id="event-name" name="name" defaultValue={existing?.name ?? ''} required minLength={3} maxLength={100} /></div>
+            <div className="field"><label htmlFor="season">Season</label><select id="season" name="seasonId" defaultValue={data.seasons.find((season) => season.status === 'active')?.id ?? data.seasons[0]?.id} required>{data.seasons.map((season) => <option key={season.id} value={season.id}>{season.name}</option>)}</select></div>
+            <div className="field"><label htmlFor="visibility">Visibility</label><select id="visibility" name="visibility" defaultValue={existing?.visibility ?? 'league'}><option value="league">League members</option><option value="public">Public</option><option value="organizers">Organizers only</option></select></div>
+            <div className="field"><label htmlFor="starts-at">Starts</label><input id="starts-at" name="startsAt" type="datetime-local" value={activeStartsAt} onChange={(event) => { setSelectedStartsAt(event.target.value); setSavedEventId(null); }} required /></div>
+            <div className="field"><label htmlFor="ends-at">Ends (optional)</label><input id="ends-at" name="endsAt" type="datetime-local" defaultValue={existing?.ends_at ? localDateTime(existing.ends_at) : ''} /></div>
+            <div className="field field--wide"><label htmlFor="timezone">Venue timezone</label><input id="timezone" name="timezone" defaultValue={existing?.timezone ?? data.league?.timezone ?? 'America/Detroit'} required /></div>
+          </div>
+        </section>
+
+        <section>
+          <div className="builder-step">
+            <span>2</span>
+            <div><h2>Course and tee</h2><p>Publishing freezes this exact hole and handicap data.</p></div>
+          </div>
+          <div className="field">
+            <label htmlFor="tee-set">Tee set</label>
+            <select id="tee-set" name="teeSetId" value={activeTeeSetId} onChange={(event) => { setSelectedTeeSetId(event.target.value); setSavedEventId(null); }} required>
+              {data.teeSets.map((tee) => <option key={tee.id} value={tee.id}>{tee.label} · Par {tee.par} · {tee.course_rating}/{tee.slope_rating}</option>)}
+            </select>
+          </div>
+        </section>
+
+        <section>
+          <div className="builder-step">
+            <span>3</span>
+            <div><h2>Field and format</h2><p>Select the players, then confirm how the day competes.</p></div>
+          </div>
+          <div className="field competition-preset">
+            <label htmlFor="competition-preset">Competition preset</label>
+            <select id="competition-preset" value={activePreset} onChange={(event) => {
+              const nextPreset = event.target.value as CompetitionPreset;
+              setPreset(nextPreset);
+              setTeamDrafts(groupParticipants(activeIds, teamSizeForPreset(nextPreset) ?? 2));
+              setSavedEventId(null);
+            }}>
+              <option value="two_person_throwdown">Two-person throwdown · six competitions</option>
+              <option value="three_player_scramble">Three-player scramble · gross and net</option>
+              <option value="four_player_scramble">Four-player scramble · gross and net</option>
+              <option value="individual_gross">Individual gross · one competition</option>
+            </select>
+            <small>{presetDescription(activePreset)}</small>
+          </div>
+
+          <fieldset className="choice-list">
+            <legend>Event field</legend>
+            {data.participants.map((participant) => (
+              <label key={participant.id}>
+                <input type="checkbox" name="participantIds" value={participant.id} checked={activeIds.includes(participant.id)} onChange={(event) => toggleParticipant(participant.id, event.target.checked)} />
+                <span><strong>{participant.display_name}</strong><small>{participant.profile_id ? 'Account linked' : 'Guest player'}</small></span>
+              </label>
+            ))}
+          </fieldset>
+
+          {isTeamEvent && (
+            <div className="handicap-review" aria-labelledby="handicap-review-title">
+              <div className="section-heading">
+                <div>
+                  <h3 id="handicap-review-title">Handicap review</h3>
+                  <p>{isScramble ? 'The team Playing Handicap uses the reviewed low-to-high weight preset.' : 'Course Handicap stays unrounded; each competition rounds its own allowance.'}</p>
+                </div>
+                <span>{activeTeeSet?.name ?? 'Selected tee'}</span>
+              </div>
+              <p className="table-scroll-hint">Swipe horizontally for source and Course Handicap.</p>
+              <div className="handicap-review-table" tabIndex={0} aria-label="Handicap review table, scroll horizontally for all columns">
+                <table>
+                  <thead><tr><th scope="col">Player</th><th scope="col">Source / index</th><th scope="col">Course Handicap</th>{!isScramble && <><th scope="col">PH 100%</th><th scope="col">PH 85%</th></>}</tr></thead>
+                  <tbody>{handicapReview.map((row) => <tr key={row.participantId}><th scope="row">{row.name}</th><td>{row.handicap ? `${sourceLabel(row.handicap.source)} · ${formatHandicapIndex(Number(row.handicap.value))}` : <strong className="state-warning">Missing</strong>}</td><td>{row.courseHandicap === null ? '—' : row.courseHandicap.toFixed(6)}</td>{!isScramble && <><td>{row.fullPlayingHandicap ?? '—'}</td><td>{row.bestBallPlayingHandicap ?? '—'}</td></>}</tr>)}</tbody>
+                </table>
+              </div>
+              {!handicapsValid && <p className="form-message form-message--warning">Add a current handicap record for every selected player before saving a net event.</p>}
+
+              {isScramble && (
+                <div className="scramble-handicap-summary">
+                  <p><strong>Frozen preset:</strong> {weights?.map((weight) => `${Math.round(weight * 100)}%`).join(' + ')} from the lowest Course Handicap upward.</p>
+                  <p className="table-scroll-hint">Swipe horizontally for the unrounded handicap and Team PH.</p>
+                  <div className="handicap-review-table" tabIndex={0} aria-label="Calculated scramble team handicaps">
+                    <table>
+                      <thead><tr><th scope="col">Team</th><th scope="col">Unrounded team handicap</th><th scope="col">Team PH</th></tr></thead>
+                      <tbody>{scrambleTeamReview.map((team, index) => <tr key={`${team.name}-${index}`}><th scope="row">{team.name}</th><td>{team.unrounded?.toFixed(6) ?? '—'}</td><td>{team.playingHandicap ?? '—'}</td></tr>)}</tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {isTeamEvent && (
+            <div className="team-pairings" aria-labelledby="team-pairings-title">
+              <div className="section-heading">
+                <div>
+                  <h3 id="team-pairings-title">{effectiveTeamSize}-player teams</h3>
+                  <p>{activePreset === 'two_person_throwdown' ? 'Each selected player appears once; every group contains exactly two teams.' : 'Each selected player appears once; each team receives one shared scorecard.'}</p>
+                </div>
+                <span>{activeTeams.length} teams</span>
+              </div>
+              {!pairingsValid && <p className="form-message form-message--warning">{pairingMessage(activePreset)}</p>}
+              {activeTeams.map((team, teamIndex) => (
+                <div className={`team-pairing team-pairing--${effectiveTeamSize}`} key={`${teamIndex}-${team.participantIds.join('-')}`}>
+                  <label className="field team-pairing__name"><span>Team name</span><input value={team.name} maxLength={80} onChange={(event) => { const next = [...activeTeams]; next[teamIndex] = { ...team, name: event.target.value }; setTeamDrafts(next); setSavedEventId(null); }} required /></label>
+                  {Array.from({ length: effectiveTeamSize }, (_, slot) => (
+                    <label className="field" key={slot}>
+                      <span>Player {slot + 1}</span>
+                      <select value={team.participantIds[slot] ?? ''} onChange={(event) => updateTeamMember(teamIndex, slot, event.target.value)} required>
+                        <option value="">Select player</option>
+                        {activeIds.map((participantId) => <option key={participantId} value={participantId}>{data.participants.find((participant) => participant.id === participantId)?.display_name ?? 'Player'}</option>)}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <fieldset className="choice-list choice-list--compact">
+            <legend>Marker access (optional)</legend>
+            {data.participants.filter((participant) => participant.profile_id).map((participant) => (
+              <label key={participant.id}>
+                <input type="checkbox" name="scorerProfileIds" value={participant.profile_id!} />
+                <span><strong>{participant.display_name}</strong><small>Can score the entire field</small></span>
+              </label>
+            ))}
+          </fieldset>
+        </section>
+
+        <section className="preflight">
+          <div className="builder-step">
+            <span>4</span>
+            <div><h2>Preflight and publish</h2><p>These checks are repeated in one server transaction.</p></div>
+          </div>
+          <ul>
+            {activePreset === 'two_person_throwdown' && <><li>Every tee group contains two complete two-person teams</li><li>Every net player has a reviewed handicap source, Course Handicap, and competition Playing Handicap</li><li>Six simultaneous competitions use the same individual scorecards</li><li>Best-ball net applies 85% before choosing each hole’s contributor</li></>}
+            {isScramble && <><li>Every team contains exactly {effectiveTeamSize} players and receives one team scorecard</li><li>Gross and net competitions use the same team hole scores; no individual scores are fabricated</li><li>The {weights?.map((weight) => `${Math.round(weight * 100)}%`).join('/')} weight preset and calculated team Playing Handicap will be frozen</li></>}
+            <li>Tee par, rating, slope, and stroke indexes are complete</li>
+            <li>Course Handicap and immutable roster snapshots will be frozen</li>
+          </ul>
+          <div className="builder-actions">
+            <button className="button button--secondary" type="submit" disabled={submitting || activeIds.length === 0 || !pairingsValid || !handicapsValid}>{submitting ? 'Working…' : 'Save draft'}</button>
+            <button className="button button--primary" type="button" onClick={() => void publish()} disabled={!savedEventId || submitting}>Publish and open scoring</button>
+          </div>
+        </section>
       </form>
     </div>
   );
 }
 
-function pairParticipants(participantIds: string[]): TeamDraft[] {
+function groupParticipants(participantIds: string[], teamSize: number): TeamDraft[] {
   const teams: TeamDraft[] = [];
-  for (let index = 0; index < participantIds.length; index += 2) {
+  for (let index = 0; index < participantIds.length; index += teamSize) {
     teams.push({
       name: `Team ${teams.length + 1}`,
-      participantIds: [participantIds[index] ?? '', participantIds[index + 1] ?? ''],
+      participantIds: Array.from(
+        { length: teamSize },
+        (_, offset) => participantIds[index + offset] ?? '',
+      ),
     });
   }
   return teams;
+}
+
+function teamSizeForPreset(preset: CompetitionPreset): 2 | 3 | 4 | null {
+  if (preset === 'two_person_throwdown') return 2;
+  if (preset === 'three_player_scramble') return 3;
+  if (preset === 'four_player_scramble') return 4;
+  return null;
+}
+
+function inferExistingPreset(teams: TeamDraft[]): CompetitionPreset | null {
+  const size = teams[0]?.participantIds.length;
+  if (size === 2) return 'two_person_throwdown';
+  if (size === 3) return 'three_player_scramble';
+  if (size === 4) return 'four_player_scramble';
+  return null;
+}
+
+function scrambleWeights(preset: CompetitionPreset): number[] | null {
+  if (preset === 'three_player_scramble') return [0.3, 0.2, 0.1];
+  if (preset === 'four_player_scramble') return [0.25, 0.2, 0.15, 0.1];
+  return null;
+}
+
+function presetDescription(preset: CompetitionPreset) {
+  if (preset === 'two_person_throwdown') {
+    return 'Gross and net individual, best ball, and skins share every submitted score.';
+  }
+  if (preset === 'three_player_scramble') {
+    return 'Each three-player team records one team score per hole; 30/20/10 weights produce the frozen team Playing Handicap.';
+  }
+  if (preset === 'four_player_scramble') {
+    return 'Each four-player team records one team score per hole; 25/20/15/10 weights produce the frozen team Playing Handicap.';
+  }
+  return 'A simple gross stroke-play event.';
+}
+
+function pairingMessage(preset: CompetitionPreset) {
+  if (preset === 'two_person_throwdown') {
+    return 'Select players in groups of four so every tee group has two complete teams.';
+  }
+  const teamSize = teamSizeForPreset(preset) ?? 2;
+  return `Select enough players for at least two complete ${teamSize}-player teams, with each player assigned once.`;
 }
 
 function relationValue<T>(value: T | T[] | null): T | null {

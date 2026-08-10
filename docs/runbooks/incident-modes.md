@@ -6,7 +6,7 @@ clear the outbox, never sign out scorers, never clear site data.**
 ## Realtime degraded (C.2)
 
 Keep scoring open as long as HTTPS commits work. The app shows polling mode and
-polls the active projection revision every 15 seconds while visible. Do not
+polls the active projection revision every 10 seconds while visible. Do not
 manually re-enter scores that show "saved on device" or "server saved". When
 realtime returns, clients reconnect and refetch authoritative revisions.
 
@@ -27,8 +27,9 @@ the round.
 
 ## Projection stuck
 
-Raw scores remain authoritative. The director invokes rebuild-projections from
-the scoring control room. Never edit scores to "fix" a stale leaderboard.
+Raw scores remain authoritative. The director opens **Operations → Projection
+repair** and invokes **Rebuild projections** for the event. Never edit scores
+to "fix" a stale leaderboard.
 
 ## Bad release
 

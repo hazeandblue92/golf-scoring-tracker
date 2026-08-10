@@ -55,4 +55,59 @@ describe('integration harness', () => {
 
     expect(data?.length ?? 0).toBeGreaterThan(0)
   })
+
+  it('repairs the newest projection after two overlapping score writes', async () => {
+    const writes = await Promise.all([1, 2].map((holeIndex) => callFunction<{
+      eventRevision: number
+    }>(
+      'submit-score',
+      scoreRequest(fx, {
+        target: {
+          kind: 'individual',
+          entryId: fx.entries[0].entryId,
+          holeId: fx.holes[holeIndex].id,
+        },
+      }),
+      fx.director.accessToken,
+    )))
+    expect(writes.every((write) => write.status === 200)).toBe(true)
+    const expectedRevision = Math.max(...writes.map((write) => write.body.eventRevision))
+    const deadline = Date.now() + 3_000
+    let projectionRevision = -1
+    do {
+      const { data } = await fx.service
+        .from('competition_projections')
+        .select('event_revision')
+        .eq('competition_id', fx.competitions.grossId)
+        .order('event_revision', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      projectionRevision = Number(data?.event_revision ?? -1)
+      if (projectionRevision === expectedRevision) break
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    } while (Date.now() < deadline)
+    expect(projectionRevision).toBe(expectedRevision)
+  })
+
+  it('rejects an unexpired JWT immediately after its profile is disabled', async () => {
+    const disabled = await fx.service
+      .from('profiles')
+      .update({ status: 'disabled' })
+      .eq('id', fx.director.profileId)
+    if (disabled.error) throw disabled.error
+
+    const result = await callFunction<{ errorCode: string }>(
+      'submit-score',
+      scoreRequest(fx, {
+        target: {
+          kind: 'individual',
+          entryId: fx.entries[0].entryId,
+          holeId: fx.holes[3].id,
+        },
+      }),
+      fx.director.accessToken,
+    )
+    expect(result.status).toBe(401)
+    expect(result.body.errorCode).toBe('AUTH_REQUIRED')
+  })
 })

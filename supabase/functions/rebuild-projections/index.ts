@@ -5,6 +5,7 @@
  * which remain authoritative. Director or operator only.
  */
 
+import { rebuildProjectionsRequestSchema } from '../../../packages/contracts/src/index.ts'
 import { buildProjections } from '../_shared/projection-orchestrator.ts'
 import { loadScoringSnapshot } from '../_shared/snapshot.ts'
 import {
@@ -29,11 +30,11 @@ Deno.serve(async (req: Request) => {
   const caller = await requireUser(req, correlationId)
   if (caller instanceof Response) return caller
 
-  const body = (await readJsonBody(req)) as { eventId?: string } | null
-  const eventId = body?.eventId
-  if (!eventId) {
-    return rejected(400, 'SCORE_INVALID', correlationId, 'eventId is required')
+  const parsed = rebuildProjectionsRequestSchema.safeParse(await readJsonBody(req))
+  if (!parsed.success) {
+    return rejected(400, 'SCORE_INVALID', correlationId, 'a valid eventId is required')
   }
+  const { eventId } = parsed.data
 
   // Authorization: the caller must hold an active director/admin/owner grant
   // for this event's league or the event itself. role_assignments is readable

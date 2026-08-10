@@ -17,7 +17,12 @@ npm run backend:start  # local Supabase (requires Supabase CLI + container runti
 npm run backend:seed   # reset DB, apply migrations + seed
 npm run web:start      # Vite dev server for apps/web
 npm test               # unit + property + golden vector suites
-npm run build          # production build, all workspaces
+npm run build          # production web-app build
+npm run test:integration     # database, Edge Function, and RLS checks
+npm run test:e2e             # Chromium, Firefox, WebKit, and Pixel 7 matrix
+npm run test:bundle-budget   # enforce the 250 KiB initial JS limit
+npm run test:security        # verify CSP/headers and scan built bundles
+npm run test:licenses        # enforce the reviewed dependency license list
 ```
 
 ## Repository layout (spec §13.4)
@@ -34,7 +39,7 @@ tests/e2e/                Playwright suites
 tests/security/           RLS/RPC tests
 docs/                     ADRs, runbooks, data dictionary
 .github/workflows/        CI, deploy, backup, dependency review
-public/                   Manifest, icons, static policy pages
+apps/web/public/          Host headers, redirects, and static web assets
 ```
 
 ## Architecture in one paragraph

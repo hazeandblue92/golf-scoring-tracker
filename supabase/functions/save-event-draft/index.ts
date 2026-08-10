@@ -1,4 +1,4 @@
-/** Save an individual or Phase 2 two-person event draft (spec §5.2). */
+/** Save an individual, two-person, or Phase 3 scramble event draft (spec §5.2). */
 
 import { saveEventDraftRequestSchema } from '../../../packages/contracts/src/index.ts'
 import {
@@ -27,7 +27,12 @@ Deno.serve(async (req: Request) => {
       parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '))
   }
   const body = parsed.data
-  const { data, error } = await serviceClient().rpc('save_phase2_event_draft', {
+  const scramblePreset = body.competitionPreset === 'three_player_scramble'
+    || body.competitionPreset === 'four_player_scramble'
+  const rpcName = scramblePreset
+    ? 'save_phase3_scramble_event_draft'
+    : 'save_phase2_event_draft'
+  const { data, error } = await serviceClient().rpc(rpcName, {
     p_actor: caller.userId,
     p_event_id: body.eventId ?? null,
     p_league_id: body.leagueId,

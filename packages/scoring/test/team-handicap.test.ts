@@ -164,7 +164,7 @@ describe('scramble team handicap goldens (spec §8.8, §20.2)', () => {
     expect(chs).toEqual([fromTenths(186), fromTenths(52)])
   })
 
-  it('throws RangeError on weight/CH length mismatch and on empty input', () => {
+  it('throws RangeError on unsupported team sizes, mismatched counts, and invalid weights', () => {
     expect(() =>
       scrambleTeamHandicap(
         [fromTenths(52), fromTenths(105), fromTenths(186)],
@@ -176,6 +176,16 @@ describe('scramble team handicap goldens (spec §8.8, §20.2)', () => {
       scrambleTeamHandicap([fromTenths(52)], SCRAMBLE_WEIGHT_PRESETS[2], usga),
     ).toThrow(RangeError)
     expect(() => scrambleTeamHandicap([], [], usga)).toThrow(RangeError)
+    expect(() => scrambleTeamHandicap(
+      [fromTenths(10), fromTenths(20)],
+      [rational(-1, 10), rational(1, 10)],
+      usga,
+    )).toThrow(/between 0 and 1/)
+    expect(() => scrambleTeamHandicap(
+      [fromTenths(10), fromTenths(20)],
+      [rational(11, 10), rational(1, 10)],
+      usga,
+    )).toThrow(/between 0 and 1/)
   })
 
   it('is invariant under permutation of the input course handicaps', () => {

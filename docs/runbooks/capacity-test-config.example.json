@@ -1,0 +1,19 @@
+{
+  "eventId": "00000000-0000-4000-8000-000000000001",
+  "competitionId": "00000000-0000-4000-8000-000000000002",
+  "competitionIds": [
+    "00000000-0000-4000-8000-000000000002"
+  ],
+  "scoreCells": [
+    {
+      "roundId": "00000000-0000-4000-8000-000000000003",
+      "target": {
+        "kind": "individual",
+        "entryId": "00000000-0000-4000-8000-000000000004",
+        "holeId": "00000000-0000-4000-8000-000000000005"
+      },
+      "baseRevision": 0
+    }
+  ],
+  "note": "Replace placeholders and provide at least 900 distinct disposable score cells before running the official 30-per-second capacity profile."
+}

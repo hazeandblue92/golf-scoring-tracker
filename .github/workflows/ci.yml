@@ -24,6 +24,10 @@ jobs:
         run: npx vitest run
       - name: Production web build (§16.3)
         run: npm run build --workspace apps/web --if-present
+      - name: Initial JavaScript budget (§19.1)
+        run: npm run test:bundle-budget
+      - name: CSP, security headers, and secret scan (§13, §23.3)
+        run: npm run test:security
       - name: Static source lint (§16.3)
         run: npm run lint
 
@@ -44,16 +48,15 @@ jobs:
         run: npm run backend:seed
       - name: Database, Edge Function, and RLS integration tests (§20.1)
         run: npm run test:integration
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
-      - name: Phase 1 browser and axe smoke (§16.3, §20.1)
-        run: npm run test:e2e -- --project=chromium
+      - name: Install supported Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Desktop/mobile browser and axe matrix (§18, §20.1)
+        run: npm run test:e2e
       - name: Stop local Supabase
         if: always()
         run: npx supabase stop --no-backup
 
   # Spec §16.3 dependency provenance/audit and §13.2 license gate.
-  # The license scan gate remains manual until an ADR selects a scanner.
   licenses:
     runs-on: ubuntu-latest
     steps:
@@ -66,5 +69,5 @@ jobs:
         run: npm ci
       - name: Dependency tree integrity (§16.3)
         run: npm ls --all --json > /dev/null
-      - name: License scan gate placeholder (§13.2)
-        run: echo "License scan gate (spec §13.2) is completed manually until the tooling decision lands in an ADR."
+      - name: Dependency license allow-list (§13.2)
+        run: npm run test:licenses

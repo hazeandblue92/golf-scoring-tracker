@@ -29,7 +29,19 @@ Deno.serve(async (req: Request) => {
   }
 
   const service = serviceClient()
-  const { data, error } = await service.rpc('publish_phase2_event', {
+  const { data: scrambleCompetitions, error: competitionError } = await service
+    .from('competitions')
+    .select('id')
+    .eq('event_id', parsed.data.eventId)
+    .eq('format', 'scramble')
+    .limit(1)
+  if (competitionError) {
+    return rejected(500, 'SERVICE_UNAVAILABLE', correlationId, competitionError.message)
+  }
+  const rpcName = (scrambleCompetitions ?? []).length > 0
+    ? 'publish_phase3_scramble_event'
+    : 'publish_phase2_event'
+  const { data, error } = await service.rpc(rpcName, {
     p_actor: caller.userId,
     p_event_id: parsed.data.eventId,
     p_open_scoring: parsed.data.openScoring,

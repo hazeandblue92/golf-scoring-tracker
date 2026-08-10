@@ -22,6 +22,7 @@ Deno.serve(async (req: Request) => {
   }
 
   let dbOk = false
+  let authOk = false
   try {
     const { createClient } = await import('npm:@supabase/supabase-js@2')
     const env = readEdgeEnv()
@@ -32,11 +33,17 @@ Deno.serve(async (req: Request) => {
       .from('leagues')
       .select('id', { count: 'exact', head: true })
     dbOk = !error
+    const { error: authError } = await service.auth.admin.listUsers({
+      page: 1,
+      perPage: 1,
+    })
+    authOk = !authError
   } catch {
     dbOk = false
+    authOk = false
   }
 
-  const status = dbOk ? 'ok' : 'degraded'
+  const status = dbOk && authOk ? 'ok' : 'degraded'
   const caller = await requireUser(req, correlationId)
 
   if (caller instanceof Response) {
@@ -47,7 +54,10 @@ Deno.serve(async (req: Request) => {
   return json(200, {
     status,
     appVersion: Deno.env.get('RELEASE_VERSION') ?? 'dev',
+    edgeVersion: Deno.env.get('RELEASE_VERSION') ?? 'dev',
     engineVersion: ENGINE_VERSION,
+    schemaVersion: 20,
+    authOk,
     dbOk,
     correlationId,
   })

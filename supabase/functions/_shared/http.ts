@@ -7,6 +7,7 @@
  */
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
+import { createSupabaseContext } from 'npm:@supabase/server@1.4.1'
 import { CORS_HEADERS, json, readEdgeEnv } from './auth-http.ts'
 
 export {
@@ -74,16 +75,32 @@ export async function requireUser(
     return rejected(401, 'AUTH_REQUIRED', correlationId, 'missing bearer token')
   }
   const token = match[1].trim()
-  const env = readEdgeEnv()
-  const client = createClient(env.supabaseUrl, env.publishableKey, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-    auth: { autoRefreshToken: false, persistSession: false },
-  })
-  const { data, error } = await client.auth.getUser()
-  if (error || !data.user) {
+  let context
+  try {
+    const result = await createSupabaseContext(req, { auth: 'user' })
+    if (result.error) {
+      return rejected(401, 'AUTH_REQUIRED', correlationId, 'invalid session')
+    }
+    context = result.data
+  } catch {
     return rejected(401, 'AUTH_REQUIRED', correlationId, 'invalid session')
   }
-  return { client, userId: data.user.id, token }
+  if (!context?.userClaims?.id) {
+    return rejected(401, 'AUTH_REQUIRED', correlationId, 'invalid session')
+  }
+  const { data: profile, error: profileError } = await context.supabase
+    .from('profiles')
+    .select('status,must_change_password')
+    .eq('id', context.userClaims.id)
+    .maybeSingle()
+  if (profileError || !profile || profile.status !== 'active') {
+    return rejected(401, 'AUTH_REQUIRED', correlationId, 'inactive session')
+  }
+  return {
+    client: context.supabase as SupabaseClient,
+    userId: context.userClaims.id,
+    token,
+  }
 }
 
 export function corsPreflight(req: Request): Response | null {

@@ -393,6 +393,17 @@ deno_version = 2
 [functions.username-login]
 verify_jwt = false
 
+# Public callers receive status only; authenticated operators receive safe
+# version and dependency detail from the function itself.
+[functions.health]
+verify_jwt = false
+
+# Error reports are sanitized, aggregate-only, and contain no free text. The
+# endpoint is available before authentication so the sign-in shell and global
+# error boundary can report failures; the database caps each hourly bucket.
+[functions.report-error]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327

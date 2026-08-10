@@ -20,30 +20,30 @@ colors:
   focus: "#1169af"
 typography:
   display:
-    fontFamily: "Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontFamily: "Avenir Next, Avenir, Segoe UI, ui-sans-serif, sans-serif"
     fontSize: "3.2rem"
     fontWeight: 800
     lineHeight: 1.05
     letterSpacing: "-0.03em"
   headline:
-    fontFamily: "Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontFamily: "Avenir Next, Avenir, Segoe UI, ui-sans-serif, sans-serif"
     fontSize: "2rem"
     fontWeight: 800
     lineHeight: 1.08
     letterSpacing: "-0.025em"
   title:
-    fontFamily: "Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontFamily: "Avenir Next, Avenir, Segoe UI, ui-sans-serif, sans-serif"
     fontSize: "1.25rem"
     fontWeight: 800
     lineHeight: 1.2
     letterSpacing: "-0.015em"
   body:
-    fontFamily: "Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontFamily: "Avenir Next, Avenir, Segoe UI, ui-sans-serif, sans-serif"
     fontSize: "1rem"
     fontWeight: 400
     lineHeight: 1.55
   label:
-    fontFamily: "Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontFamily: "Avenir Next, Avenir, Segoe UI, ui-sans-serif, sans-serif"
     fontSize: "0.8rem"
     fontWeight: 800
     lineHeight: 1.2
@@ -156,7 +156,7 @@ The palette resembles sunlit paper, ink, and a deep green course sign. Use turf 
 
 ## Typography
 
-**Display and body font:** Inter when locally available, followed by the native sans-serif stack. Do not load a remote font.
+**Display and body font:** Avenir Next when locally available, followed by Avenir, Segoe UI, and the native sans-serif stack. Do not load a remote font.
 
 The type system is compact, sturdy, and numerical. Tight tracking gives large event and hole headings authority; ordinary body copy stays open and readable. Weight creates most of the hierarchy.
 
@@ -227,13 +227,14 @@ Borders are quiet but structural: inputs use a darker neutral stroke for visibil
 
 - Composite format presets name the full consequence before detailed choices: which competitions will exist, which scores they share, and which handicap allowances apply.
 - Put computed handicap evidence immediately before team construction. The compact review table exposes source/index, unrounded Course Handicap, and each competition's rounded Playing Handicap; missing authority is written as `Missing` and paired with a blocking warning.
-- Two-person pairings use rule-separated rows with one team name and exactly two labeled player slots. They stack on mobile and become a three-column comparison row when space permits; every player appears once and incomplete groups explain the required correction.
+- When a team handicap is derived from several players, follow the player evidence with a second ruled summary naming the frozen weight preset, unrounded team value, and rounded team Playing Handicap.
+- Team construction uses rule-separated rows with one team name and two to four labeled player slots. Stack every field on mobile; at wider widths keep the name full-width until all player slots fit in one comparison row. Every selected player appears exactly once, and incomplete groups explain the required correction.
 - Publication replaces the editor with a dedicated frozen state rather than a disabled form. Name what is immutable, show the event state, and offer only safe next destinations such as the event view and scoring control room.
 
 ### Score entry
 
 - The hole header is a dark turf slab containing a large hole number and compact Par, SI, and Yards facts.
-- Each player row begins with initials, name, handicap, and server revision. Use initials rather than avatars or uploaded photos.
+- Each scoring-entity row begins with initials, name, handicap, and server revision. Shared-ball formats make the named team the entity, label its handicap as `Team playing handicap`, and collect one team score per hole; never fabricate individual scores from a shared card. Use initials rather than avatars or uploaded photos.
 - The decrement, input, and increment control is a three-column unit with `54px` targets. The score input is the dominant center element; direct numeric input remains available.
 - Result status is an explicit select (`Completed`, `Picked up`, `No score`, `Withdrawn`). Missing or exceptional results are never silently converted to zero.
 - The fixed footer combines progress, a polite live save message, and one unambiguous `Save hole N` action.
@@ -250,6 +251,7 @@ Borders are quiet but structural: inputs use a darker neutral stroke for visibil
 ### Lists, tables, and operational panels
 
 - Event schedules, leaderboards, facts, conflicts, and audit items use full-width rows with rule-line separation.
+- Leaderboard rows support both player and team scorecards. Preserve table-row semantics and make the entity name the explicit scorecard link instead of wrapping the whole row.
 - Table headers use a slightly darker neutral surface and compact uppercase labels. Right-align score results and numeric totals when it improves comparison.
 - Skins results use one dark-turf totals panel above a chronological, rule-separated hole ledger. Every hole states winner and units, `Tied · carries forward`, or `Provisional` in words, with carried-in units kept as secondary evidence; label totals as units, never money.
 - Empty states are calm paper panels with one heading and one sentence. Error states explain the recovery action when one exists.

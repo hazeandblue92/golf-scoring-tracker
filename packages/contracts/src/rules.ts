@@ -69,6 +69,19 @@ export const aggregateTeamConfigSchema = teamConfigSchema.refine(
   },
 )
 
+/** Scramble records one team ball and freezes one weight per team member. */
+export const scrambleTeamConfigSchema = z
+  .strictObject({
+    teamSize: z.union([z.literal(2), z.literal(3), z.literal(4)]),
+    bestK: z.literal(1),
+    scoreSource: z.literal('team_ball'),
+    weights: z.array(z.number().min(0).max(1)).min(2).max(4),
+  })
+  .refine((team) => team.weights.length === team.teamSize, {
+    message: 'scramble requires one weight per team member',
+    path: ['weights'],
+  })
+
 /**
  * Points map keyed by relation to par: a signed integer ('-3'..'2') or a
  * nonnegative integer with a trailing '+' meaning "this relation and worse"
@@ -140,7 +153,7 @@ export const skinsRulesSchema = z.strictObject({
 export const scrambleRulesSchema = z.strictObject({
   format: z.literal('scramble'),
   ...commonFields,
-  team: teamConfigSchema,
+  team: scrambleTeamConfigSchema,
 })
 
 export const foursomesRulesSchema = z.strictObject({

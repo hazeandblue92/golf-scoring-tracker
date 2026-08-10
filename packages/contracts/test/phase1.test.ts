@@ -61,6 +61,42 @@ describe('Phase 1 organizer contracts', () => {
     }).success).toBe(false)
   })
 
+  it('accepts complete three- and four-player scramble teams', () => {
+    const common = {
+      leagueId: id('1'), seasonId: id('2'), name: 'Scramble Day',
+      timezone: 'UTC', startsAt: '2026-09-12T13:00:00Z', endsAt: null,
+      visibility: 'league' as const, teeSetId: id('3'),
+    }
+    const threePlayer = {
+      ...common,
+      participantIds: [id('4'), id('5'), id('6'), id('7'), id('8'), id('9')],
+      competitionPreset: 'three_player_scramble' as const,
+      teams: [
+        { name: 'North', participantIds: [id('4'), id('5'), id('6')] },
+        { name: 'South', participantIds: [id('7'), id('8'), id('9')] },
+      ],
+    }
+    expect(saveEventDraftRequestSchema.safeParse(threePlayer).success).toBe(true)
+
+    const fourPlayer = {
+      ...common,
+      participantIds: [id('4'), id('5'), id('6'), id('7'), id('8'), id('9'), id('10'), id('11')],
+      competitionPreset: 'four_player_scramble' as const,
+      teams: [
+        { name: 'East', participantIds: [id('4'), id('5'), id('6'), id('7')] },
+        { name: 'West', participantIds: [id('8'), id('9'), id('10'), id('11')] },
+      ],
+    }
+    expect(saveEventDraftRequestSchema.safeParse(fourPlayer).success).toBe(true)
+    expect(saveEventDraftRequestSchema.safeParse({
+      ...fourPlayer,
+      teams: [
+        { name: 'East', participantIds: [id('4'), id('5'), id('6')] },
+        { name: 'West', participantIds: [id('7'), id('8'), id('9'), id('10')] },
+      ],
+    }).success).toBe(false)
+  })
+
   it('rejects duplicate participant ids before setup reaches the server', () => {
     const duplicate = id('4')
     const parsed = saveEventDraftRequestSchema.safeParse({

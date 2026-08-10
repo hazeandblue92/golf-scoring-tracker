@@ -26,16 +26,22 @@ export const saveEventDraftRequestSchema = z.strictObject({
   participantIds: uuidArray,
   scorerProfileIds: z.array(z.uuid()).default([]),
   competitionPreset: z
-    .enum(['individual_gross', 'two_person_throwdown'])
+    .enum([
+      'individual_gross',
+      'two_person_throwdown',
+      'three_player_scramble',
+      'four_player_scramble',
+    ])
     .default('individual_gross'),
   teams: z
     .array(
       z.strictObject({
         name: z.string().trim().min(1).max(80),
-        participantIds: z.tuple([z.uuid(), z.uuid()]).refine(
-          ([first, second]) => first !== second,
-          { message: 'A team must contain two different participants' },
-        ),
+        participantIds: z.array(z.uuid()).min(2).max(4).superRefine((ids, ctx) => {
+          if (new Set(ids).size !== ids.length) {
+            ctx.addIssue({ code: 'custom', message: 'Team members must be unique' })
+          }
+        }),
       }),
     )
     .default([]),
@@ -51,19 +57,41 @@ export const saveEventDraftRequestSchema = z.strictObject({
     return
   }
 
+  const teamSize = value.competitionPreset === 'two_person_throwdown'
+    ? 2
+    : value.competitionPreset === 'three_player_scramble'
+      ? 3
+      : 4
+
   if (value.teams.length < 2) {
     ctx.addIssue({
       code: 'custom',
       path: ['teams'],
-      message: 'Two-person throwdowns require at least two teams',
+      message: 'Team events require at least two teams',
     })
   }
 
-  if (value.participantIds.length % 4 !== 0 || value.teams.length % 2 !== 0) {
+  if (value.teams.some((team) => team.participantIds.length !== teamSize)) {
     ctx.addIssue({
       code: 'custom',
       path: ['teams'],
-      message: 'Two-person throwdowns require two teams (four players) in every group',
+      message: `Every team must contain exactly ${teamSize} participants`,
+    })
+  }
+
+  if (value.competitionPreset === 'two_person_throwdown') {
+    if (value.participantIds.length % 4 !== 0 || value.teams.length % 2 !== 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['teams'],
+        message: 'Two-person throwdowns require two teams (four players) in every group',
+      })
+    }
+  } else if (value.participantIds.length % teamSize !== 0) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['teams'],
+      message: `Scramble fields must divide into complete ${teamSize}-player teams`,
     })
   }
 
@@ -81,7 +109,7 @@ export const saveEventDraftRequestSchema = z.strictObject({
     })
   }
 
-  const names = value.teams.map((team) => team.name.toLocaleLowerCase())
+  const names = value.teams.map((team) => team.name.toLowerCase())
   if (new Set(names).size !== names.length) {
     ctx.addIssue({
       code: 'custom',

@@ -12,4 +12,9 @@ supabase/.branches/
 *.log
 playwright-report/
 test-results/
+# Word lock files created while the specification .docx is open
+~$*
+phase4-capacity-report.json
+phase4-restore-report.json
+.capacity-*.local
 Claude Handoff/

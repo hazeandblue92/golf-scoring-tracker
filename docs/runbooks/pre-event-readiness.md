@@ -1,14 +1,17 @@
 # Runbook: Pre-event readiness (24–48 hours before)
 
 Spec Appendix C.1. Run every item; do not skip because the last event was fine.
+Use the signable checklist in `docs/season-launch-checklist.md` as the event
+record and the Operations screen as the live evidence source.
 
 1. Confirm the Supabase project is **active** (free projects pause after ~1 week
    of low activity) and the billing plan is still Free with **no payment method
    attached**.
 2. Confirm the latest Cloudflare Pages deployment is healthy and GitHub Actions
    workflows are green.
-3. Open the Operations screen; run the health check and the synthetic
-   score/projection test (designated test event only).
+3. Open Operations; confirm the health check is current, verify projections for
+   the designated test event are current, and run **Rebuild projections** for
+   that test event. Do not create synthetic scores in a real event.
 4. Confirm a backup completed within the last 24 hours and the last restore
    drill is within policy (quarterly).
 5. Review quota headroom: database size, egress, realtime connections, Edge
