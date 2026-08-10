@@ -67,7 +67,18 @@ Deno.serve(async (req: Request) => {
   }
   const result = data as { status?: string; eventId?: string }
   if (result.status === 'blocked') {
-    return json(409, { ...result, correlationId })
+    const blockers = result as {
+      missingScores?: number
+      openConflicts?: number
+      unattestedCards?: number
+      projectionStale?: boolean
+    }
+    const detail = blockers.projectionStale
+      ? 'Finalization is waiting for the current projection. Rebuild results and try again.'
+      : `Finalization blocked: ${blockers.missingScores ?? 0} missing scores, ` +
+        `${blockers.openConflicts ?? 0} open conflicts, and ` +
+        `${blockers.unattestedCards ?? 0} unattested cards. Resolve them or record an override reason.`
+    return json(409, { ...result, detail, correlationId })
   }
   if (result.eventId) {
     try {

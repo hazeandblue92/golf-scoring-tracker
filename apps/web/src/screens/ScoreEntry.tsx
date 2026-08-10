@@ -96,6 +96,9 @@ export function ScoreEntry() {
 
   useEffect(() => {
     if (!query.data || !currentHole) return;
+    // React Query can refresh the snapshot while a group is being entered.
+    // Never let that background refresh erase unsaved edits on the hole.
+    if (dirty.size > 0) return;
     const next: Record<string, EditorValue> = {};
     for (const entry of query.data.entries) {
       const draft = query.data.drafts.find((row) => row.entityId === entry.id && row.holeId === currentHole.id);
@@ -108,7 +111,7 @@ export function ScoreEntry() {
     }
     setValues(next);
     setDirty(new Set());
-  }, [query.data, currentHole?.id, serverScores]);
+  }, [currentHole, dirty.size, query.data, serverScores]);
 
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {

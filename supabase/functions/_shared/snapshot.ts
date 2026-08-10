@@ -23,6 +23,7 @@ export interface SnapshotEntry {
   event_id: string
   participant_id: string
   status: string
+  course_handicap_unrounded: number | null
   playing_handicap: number | null
   flight_id: string | null
 }
@@ -135,7 +136,7 @@ export async function loadScoringSnapshot(
       : Promise.resolve([]),
     selectAll<SnapshotEntry>(
       service, 'event_entries',
-      'id, event_id, participant_id, status, playing_handicap, flight_id',
+      'id, event_id, participant_id, status, course_handicap_unrounded, playing_handicap, flight_id',
       (q) => q.eq('event_id', eventId),
     ),
     selectAll<SnapshotTeam>(

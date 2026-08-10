@@ -1,4 +1,5 @@
 import type {
+  AttestScorecardRequest,
   FinalizeCompetitionRequest,
   PublishEventRequest,
   ResolveScoreConflictRequest,
@@ -52,10 +53,17 @@ export const finalizeCompetition = (body: FinalizeCompetitionRequest) =>
     finalResultHash?: string;
     missingScores?: number;
     openConflicts?: number;
+    unattestedCards?: number;
   }>('finalize-competition', body);
 
 export const resolveScoreConflict = (body: ResolveScoreConflictRequest) =>
   invokePhase1<{ status: string }>('resolve-score-conflict', body);
+
+export const attestScorecard = (body: AttestScorecardRequest) =>
+  invokePhase1<{ status: 'attested' | 'duplicate'; scoreRevision: number }>(
+    'attest-scorecard',
+    body,
+  );
 
 export async function downloadEventExport(leagueId: string, eventId: string) {
   const supabase = getSupabaseClient();

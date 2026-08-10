@@ -183,7 +183,7 @@ The interface starts at a supported width of `320px`. Content sits in a centered
 
 Sticky and fixed scoring surfaces are intentional. The current-hole header stays below the top bar, the save footer stays above mobile navigation, and score lists include enough bottom padding to remain fully reachable. Never allow these layers to obscure input controls or status text.
 
-Prefer full-width divided lists, definition lists, and tables for comparable data. Use cards only for a true contained task, empty state, or feature panel. At 200% zoom and `320px` CSS width, preserve a single readable flow without horizontal scrolling.
+Prefer full-width divided lists, definition lists, and tables for comparable data. Use cards only for a true contained task, empty state, or feature panel. At 200% zoom and `320px` CSS width, preserve a single readable page flow without horizontal scrolling. Dense two-dimensional evidence tables are the exception: keep them inside a clearly labeled, keyboard-focusable horizontal scroller while the page itself remains fixed to the viewport.
 
 ## Elevation & Depth
 
@@ -205,6 +205,7 @@ Borders are quiet but structural: inputs use a darker neutral stroke for visibil
 - Primary navigation has four fixed destinations: Home, Score, Leaderboard, More. Mobile targets are at least `64px` high; desktop rows are `54px` high.
 - Icons are inline, single-color SVG strokes at `24px`, using `currentColor`, rounded caps, and no external sprite or icon font. Labels remain visible.
 - Active state uses turf on paper or white on the dark desktop rail. Hover adds a pale-green or lighter-turf surface; selection never relies on icon shape alone.
+- When one event produces several competitions, place a full-bleed horizontal competition strip after the event actions. Each paper segment keeps the competition name dominant and its metric and state secondary; preserve a useful minimum width and scroll the strip instead of squeezing or wrapping it into a card grid.
 
 ### Buttons and links
 
@@ -222,6 +223,13 @@ Borders are quiet but structural: inputs use a darker neutral stroke for visibil
 - Checkboxes and radios are native, `20px`, turf-accented, and paired with a full-width label row of at least `44px`.
 - Error, warning, and success messages use paired foreground/background semantic colors and explicit language. Do not rely on placeholder text as a label.
 
+### Event setup and frozen authority
+
+- Composite format presets name the full consequence before detailed choices: which competitions will exist, which scores they share, and which handicap allowances apply.
+- Put computed handicap evidence immediately before team construction. The compact review table exposes source/index, unrounded Course Handicap, and each competition's rounded Playing Handicap; missing authority is written as `Missing` and paired with a blocking warning.
+- Two-person pairings use rule-separated rows with one team name and exactly two labeled player slots. They stack on mobile and become a three-column comparison row when space permits; every player appears once and incomplete groups explain the required correction.
+- Publication replaces the editor with a dedicated frozen state rather than a disabled form. Name what is immutable, show the event state, and offer only safe next destinations such as the event view and scoring control room.
+
 ### Score entry
 
 - The hole header is a dark turf slab containing a large hole number and compact Par, SI, and Yards facts.
@@ -229,18 +237,21 @@ Borders are quiet but structural: inputs use a darker neutral stroke for visibil
 - The decrement, input, and increment control is a three-column unit with `54px` targets. The score input is the dominant center element; direct numeric input remains available.
 - Result status is an explicit select (`Completed`, `Picked up`, `No score`, `Withdrawn`). Missing or exceptional results are never silently converted to zero.
 - The fixed footer combines progress, a polite live save message, and one unambiguous `Save hole N` action.
+- Scorecard review places Hole, Par, SI, Gross, allocated Strokes, and Net in one ruled comparison, ending in a dark-turf total band. Attestation is a separate bordered panel tied to the exact score revision; if scores change afterward, say that the prior attestation is stale and require a fresh review.
 
 ### Status, sync, and feedback
 
 - The sync banner appears only when offline, unsynced, rejected, or conflicted. It uses an icon, a strong summary, exact secondary text, and an optional retry action.
 - Distinguish **saved on this device**, **waiting to send**, **saved to server**, **rejected**, and **conflict needs review**. Never collapse them into a generic “Saved.”
 - Leaderboards show their projection revision and a written provisional or lag message. Final results may be called official only after finalization.
+- Multi-competition health compares every competition projection with the event scoring revision. Use a flat ruled ledger with name and metric/state on the left, exact revision or numeric lag on the right, and a written aggregate summary such as `All current` or `2 updating` above it.
 - Status dots, badges, progress bars, and state colors supplement visible text; they never replace it.
 
 ### Lists, tables, and operational panels
 
 - Event schedules, leaderboards, facts, conflicts, and audit items use full-width rows with rule-line separation.
 - Table headers use a slightly darker neutral surface and compact uppercase labels. Right-align score results and numeric totals when it improves comparison.
+- Skins results use one dark-turf totals panel above a chronological, rule-separated hole ledger. Every hole states winner and units, `Tied · carries forward`, or `Provisional` in words, with carried-in units kept as secondary evidence; label totals as units, never money.
 - Empty states are calm paper panels with one heading and one sentence. Error states explain the recovery action when one exists.
 - The active event, event masthead, progress panel, and scorecard total are the recurring dark-turf anchors. Limit each view to the few anchors needed for orientation.
 
@@ -260,6 +271,7 @@ Borders are quiet but structural: inputs use a darker neutral stroke for visibil
 - **Do** make the current hole, entered score, sync authority, and next action obvious at a glance in sunlight.
 - **Do** use warm cream for the canvas, paper for work surfaces, and dark turf for a small number of operational anchors.
 - **Do** preserve exact source-of-truth language for local saves, server sync, revision lag, conflicts, provisional results, and final results.
+- **Do** distinguish editable setup, computed review, frozen authority, live projection health, and final results as explicit interface states.
 - **Do** prefer dividers and whitespace over wrapping every row in a card.
 - **Do** preserve fixed scoring controls, safe-area spacing, keyboard focus, live-region behavior, and reduced-motion support.
 - **Do** use inline SVG icons and player initials so the application remains self-contained and fast offline.

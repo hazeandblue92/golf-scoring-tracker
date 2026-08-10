@@ -18,6 +18,8 @@ import {
   calculateStableford,
   calculateStrokePlay,
   calculateTeamBallTotals,
+  playingHandicap,
+  rational,
   resultHash,
   strokesReceivedOnHole,
   type CanonicalValue,
@@ -25,11 +27,13 @@ import {
   type HoleScoreStatus,
   type HoleSnapshot,
   type IndividualHoleScore,
+  type RoundingProfile,
   type SkinsRules,
   type StablefordRules,
   type TeamHoleScore,
 } from '../../../packages/scoring/src/index.ts'
 import type { ScoringSnapshot } from './snapshot.ts'
+import type { SnapshotEntry } from './snapshot.ts'
 
 export interface ProjectionRow {
   entityId: string
@@ -183,6 +187,39 @@ function displayTotal(total: number | null, par: number): string | null {
   return rel === 0 ? 'E' : rel > 0 ? `+${rel}` : String(rel)
 }
 
+/** Derive the PH from the frozen unrounded CH and this competition's rules. */
+function competitionPlayingHandicap(
+  entry: SnapshotEntry,
+  handicap: {
+    profile: 'usga_whs_2024' | 'committee_custom' | 'none'
+    allowance: number
+    rounding:
+      | 'half_up_toward_positive_infinity'
+      | {
+          kind: 'committee_custom'
+          intermediatePrecision: number
+          tieDirection: 'up' | 'down' | 'toward_zero' | 'away_from_zero'
+          stepOrder: 'allowance_then_round' | 'round_then_allowance'
+        }
+  },
+): number | null {
+  // Gross formats ignore this value for ranking, but retain the roster's
+  // frozen 100% PH for the established secondary net-total display.
+  if (handicap.profile === 'none') return entry.playing_handicap
+  if (entry.course_handicap_unrounded === null) return entry.playing_handicap
+
+  const courseHandicap = rational(
+    Math.round(entry.course_handicap_unrounded * 1_000_000),
+    1_000_000,
+  )
+  const allowance = rational(Math.round(handicap.allowance * 1_000_000), 1_000_000)
+  const rounding: RoundingProfile =
+    handicap.rounding === 'half_up_toward_positive_infinity'
+      ? { kind: 'usga_whs_2024' }
+      : handicap.rounding
+  return playingHandicap(courseHandicap, allowance, rounding).playingHandicap
+}
+
 /**
  * Canonical summary for hashing (spec §7.3). Only safe integers and strings
  * enter the hash so the digest is byte-stable across platforms.
@@ -281,7 +318,7 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
               return {
                 entryId: entry.id,
                 entityStatus: toEntityStatus(entry.status),
-                playingHandicap: entry.playing_handicap,
+                playingHandicap: competitionPlayingHandicap(entry, rules.handicap),
                 scores: individualScoresFor(snapshot, entry.id, holeIds),
               }
             })
@@ -335,7 +372,7 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
                   const entry = snapshot.entries.find((x) => x.id === entryId)!
                   return {
                     participantId: entry.id,
-                    playingHandicap: entry.playing_handicap,
+                    playingHandicap: competitionPlayingHandicap(entry, rules.handicap),
                     scores: individualScoresFor(snapshot, entry.id, holeIds),
                   }
                 }),
@@ -380,7 +417,7 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
               return {
                 entryId: entry.id,
                 entityStatus: toEntityStatus(entry.status),
-                playingHandicap: entry.playing_handicap,
+                playingHandicap: competitionPlayingHandicap(entry, rules.handicap),
                 scores: individualScoresFor(snapshot, entry.id, holeIds),
               }
             })
@@ -415,7 +452,7 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
               return {
                 entryId: entry.id,
                 entityStatus: toEntityStatus(entry.status),
-                playingHandicap: entry.playing_handicap,
+                playingHandicap: competitionPlayingHandicap(entry, rules.handicap),
                 scores: individualScoresFor(snapshot, entry.id, holeIds),
               }
             })
@@ -476,11 +513,15 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
                       const s = scores.find((x) => x.holeId === h.id)
                       const gross = s?.grossStrokes ?? null
                       let score: number | null = gross
-                      if (score !== null && metric === 'net' && entry.playing_handicap !== null) {
+                      const playingHandicapValue = competitionPlayingHandicap(
+                        entry,
+                        rules.handicap,
+                      )
+                      if (score !== null && metric === 'net' && playingHandicapValue !== null) {
                         score =
                           score -
                           strokesReceivedOnHole(
-                            entry.playing_handicap,
+                            playingHandicapValue,
                             holes.length,
                             h.strokeIndex,
                           )

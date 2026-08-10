@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router';
 
 import { AppIcon } from '../components/AppIcon.tsx';
@@ -21,6 +22,10 @@ export function RootLayout() {
   const boardTarget = activeEventId && activeCompetitionId
     ? `/events/${activeEventId}/leaderboards/${activeCompetitionId}`
     : '/dashboard';
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [location.pathname]);
 
   return (
     <div className={publicRoute ? 'app-shell app-shell--public' : 'app-shell'}>

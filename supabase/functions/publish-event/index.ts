@@ -29,7 +29,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const service = serviceClient()
-  const { data, error } = await service.rpc('publish_phase1_event', {
+  const { data, error } = await service.rpc('publish_phase2_event', {
     p_actor: caller.userId,
     p_event_id: parsed.data.eventId,
     p_open_scoring: parsed.data.openScoring,

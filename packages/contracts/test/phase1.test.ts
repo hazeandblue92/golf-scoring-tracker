@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  attestScorecardRequestSchema,
   publishEventRequestSchema,
   resolveScoreConflictRequestSchema,
   saveEventDraftRequestSchema,
@@ -22,7 +23,42 @@ describe('Phase 1 organizer contracts', () => {
       participantIds: [id('4'), id('5')],
     })
     expect(parsed.success).toBe(true)
-    if (parsed.success) expect(parsed.data.scorerProfileIds).toEqual([])
+    if (parsed.success) {
+      expect(parsed.data.scorerProfileIds).toEqual([])
+      expect(parsed.data.competitionPreset).toBe('individual_gross')
+      expect(parsed.data.teams).toEqual([])
+    }
+  })
+
+  it('accepts a complete two-person throwdown and rejects duplicate assignments', () => {
+    const request = {
+      leagueId: id('1'), seasonId: id('2'), name: 'Two-Person Throwdown',
+      timezone: 'UTC', startsAt: '2026-09-12T13:00:00Z', endsAt: null,
+      visibility: 'league' as const, teeSetId: id('3'),
+      participantIds: [id('4'), id('5'), id('6'), id('7')],
+      competitionPreset: 'two_person_throwdown' as const,
+      teams: [
+        { name: 'North', participantIds: [id('4'), id('5')] },
+        { name: 'South', participantIds: [id('6'), id('7')] },
+      ],
+    }
+    expect(saveEventDraftRequestSchema.safeParse(request).success).toBe(true)
+    expect(saveEventDraftRequestSchema.safeParse({
+      ...request,
+      teams: [
+        { name: 'North', participantIds: [id('4'), id('5')] },
+        { name: 'South', participantIds: [id('5'), id('7')] },
+      ],
+    }).success).toBe(false)
+
+    expect(saveEventDraftRequestSchema.safeParse({
+      ...request,
+      participantIds: [...request.participantIds, id('8'), id('9')],
+      teams: [
+        ...request.teams,
+        { name: 'West', participantIds: [id('8'), id('9')] },
+      ],
+    }).success).toBe(false)
   })
 
   it('rejects duplicate participant ids before setup reaches the server', () => {
@@ -57,5 +93,16 @@ describe('Phase 1 organizer contracts', () => {
       manualValue: { status: 'complete', grossStrokes: 5, notes: null },
     })
     expect(valid.success).toBe(true)
+  })
+
+  it('requires a reason for a director scorecard override', () => {
+    expect(attestScorecardRequestSchema.safeParse({
+      roundId: id('1'), targetKind: 'individual', targetId: id('2'),
+      attestationType: 'director_override', reason: null,
+    }).success).toBe(false)
+    expect(attestScorecardRequestSchema.safeParse({
+      roundId: id('1'), targetKind: 'individual', targetId: id('2'),
+      attestationType: 'marker',
+    }).success).toBe(true)
   })
 })

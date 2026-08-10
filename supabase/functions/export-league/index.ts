@@ -1,4 +1,4 @@
-/** Portable, integrity-checked Phase 1 export (spec §§12.2, 18.2, 22). */
+/** Portable, integrity-checked event export (spec §§12.2, 18.2, 22). */
 
 import { exportLeagueRequestSchema } from '../../../packages/contracts/src/index.ts'
 import {
@@ -76,6 +76,9 @@ Deno.serve(async (req: Request) => {
     const entries = eventIds.length
       ? await select('event_entries', (q) => q.in('event_id', eventIds)) : []
     const entryIds = entries.map((row) => row.id as string)
+    const eventTeams = eventIds.length
+      ? await select('event_teams', (q) => q.in('event_id', eventIds)) : []
+    const eventTeamIds = eventTeams.map((row) => row.id as string)
     const participantIds = entries.map((row) => row.participant_id as string)
     const competitions = eventIds.length
       ? await select('competitions', (q) => q.in('event_id', eventIds)) : []
@@ -106,8 +109,14 @@ Deno.serve(async (req: Request) => {
       event_holes: roundIds.length
         ? await select('event_holes', (q) => q.in('round_id', roundIds)) : [],
       event_entries: entries,
+      event_teams: eventTeams.map((row) => ({ ...row, source_team_id: null })),
+      event_team_members: eventTeamIds.length
+        ? await select('event_team_members', (q) => q.in('event_team_id', eventTeamIds)) : [],
       flights: eventIds.length ? await select('flights', (q) => q.in('event_id', eventIds)) : [],
-      groups: roundIds.length ? await select('groups', (q) => q.in('round_id', roundIds)) : [],
+      groups: roundIds.length
+        ? (await select('groups', (q) => q.in('round_id', roundIds))).map((row) => ({
+            ...row, marker_profile_id: null,
+          })) : [],
       group_members: [],
       competitions: competitions.map((row) => ({ ...row, finalized_by: null })),
       competition_rounds: competitionIds.length
@@ -115,6 +124,10 @@ Deno.serve(async (req: Request) => {
       competition_entities: entities,
       individual_hole_scores: eventIds.length
         ? (await select('individual_hole_scores', (q) => q.in('event_id', eventIds))).map((row) => ({
+            ...row, entered_by: null,
+          })) : [],
+      team_hole_scores: eventIds.length
+        ? (await select('team_hole_scores', (q) => q.in('event_id', eventIds))).map((row) => ({
             ...row, entered_by: null,
           })) : [],
       score_conflicts: [],
@@ -142,9 +155,22 @@ Deno.serve(async (req: Request) => {
     // Keep only event entries in relationship tables and sanitize auth-linked
     // fields. Identity provisioning is intentionally not portable.
     tables.group_members = tables.group_members.filter((row) =>
-      row.event_entry_id === null || entryIds.includes(row.event_entry_id as string))
+      (row.event_entry_id === null || entryIds.includes(row.event_entry_id as string)) &&
+      (row.event_team_id === null || eventTeamIds.includes(row.event_team_id as string)))
     tables.leaderboard_rows = tables.leaderboard_rows.filter((row) =>
       entityIds.includes(row.entity_id as string))
+
+    const attestationRecords = roundIds.length
+      ? (await select('scorecard_attestations', (q) => q.in('round_id', roundIds))).map((row) => ({
+          id: row.id,
+          round_id: row.round_id,
+          event_entry_id: row.event_entry_id,
+          event_team_id: row.event_team_id,
+          attestation_type: row.attestation_type,
+          score_revision: row.score_revision,
+          attested_at: row.attested_at,
+          reason: row.reason,
+        })) : []
 
     const core = {
       format: 'gtt-portable-export',
@@ -154,6 +180,9 @@ Deno.serve(async (req: Request) => {
       finalResultHashes: competitions
         .filter((row) => row.final_result_hash !== null)
         .map((row) => ({ competitionId: row.id, hash: row.final_result_hash })),
+      // Attestations are portable evidence, but their identity-linked profile
+      // foreign key is deliberately excluded and is not restored as authority.
+      attestationRecords,
       tables,
     }
     const integrityHash = await sha256Hex(stable(core))

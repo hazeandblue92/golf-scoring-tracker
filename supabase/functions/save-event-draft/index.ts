@@ -1,4 +1,4 @@
-/** Save the complete Phase 1 launch-format event draft (spec §5.2). */
+/** Save an individual or Phase 2 two-person event draft (spec §5.2). */
 
 import { saveEventDraftRequestSchema } from '../../../packages/contracts/src/index.ts'
 import {
@@ -27,7 +27,7 @@ Deno.serve(async (req: Request) => {
       parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '))
   }
   const body = parsed.data
-  const { data, error } = await serviceClient().rpc('save_phase1_event_draft', {
+  const { data, error } = await serviceClient().rpc('save_phase2_event_draft', {
     p_actor: caller.userId,
     p_event_id: body.eventId ?? null,
     p_league_id: body.leagueId,
@@ -40,6 +40,8 @@ Deno.serve(async (req: Request) => {
     p_tee_set_id: body.teeSetId,
     p_participant_ids: body.participantIds,
     p_scorer_profile_ids: body.scorerProfileIds,
+    p_competition_preset: body.competitionPreset,
+    p_teams: body.teams,
   })
   if (error) {
     const denied = error.code === '42501'

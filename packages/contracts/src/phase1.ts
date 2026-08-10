@@ -1,9 +1,8 @@
 /**
- * Phase 1 organizer workflow contracts (spec §§5.2, 12.2, 22).
+ * Organizer workflow contracts (spec §§5.2, 12.2, 22).
  *
- * These are deliberately limited to the launch format: one 9- or 18-hole
- * individual gross competition. Later phases extend the discriminated
- * workflow without weakening these strict request boundaries.
+ * Phase 2 extends the launch request with a preset and explicit two-person
+ * teams while keeping old Phase 1 clients valid through defaults.
  */
 
 import { z } from 'zod'
@@ -26,6 +25,70 @@ export const saveEventDraftRequestSchema = z.strictObject({
   teeSetId: z.uuid(),
   participantIds: uuidArray,
   scorerProfileIds: z.array(z.uuid()).default([]),
+  competitionPreset: z
+    .enum(['individual_gross', 'two_person_throwdown'])
+    .default('individual_gross'),
+  teams: z
+    .array(
+      z.strictObject({
+        name: z.string().trim().min(1).max(80),
+        participantIds: z.tuple([z.uuid(), z.uuid()]).refine(
+          ([first, second]) => first !== second,
+          { message: 'A team must contain two different participants' },
+        ),
+      }),
+    )
+    .default([]),
+}).superRefine((value, ctx) => {
+  if (value.competitionPreset === 'individual_gross') {
+    if (value.teams.length > 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['teams'],
+        message: 'Individual gross events cannot include teams',
+      })
+    }
+    return
+  }
+
+  if (value.teams.length < 2) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['teams'],
+      message: 'Two-person throwdowns require at least two teams',
+    })
+  }
+
+  if (value.participantIds.length % 4 !== 0 || value.teams.length % 2 !== 0) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['teams'],
+      message: 'Two-person throwdowns require two teams (four players) in every group',
+    })
+  }
+
+  const selected = new Set(value.participantIds)
+  const assigned = value.teams.flatMap((team) => team.participantIds)
+  if (
+    assigned.length !== value.participantIds.length ||
+    new Set(assigned).size !== assigned.length ||
+    assigned.some((participantId) => !selected.has(participantId))
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['teams'],
+      message: 'Every selected participant must belong to exactly one team',
+    })
+  }
+
+  const names = value.teams.map((team) => team.name.toLocaleLowerCase())
+  if (new Set(names).size !== names.length) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['teams'],
+      message: 'Team names must be unique',
+    })
+  }
 })
 
 export type SaveEventDraftRequest = z.infer<typeof saveEventDraftRequestSchema>
