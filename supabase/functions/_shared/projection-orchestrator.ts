@@ -133,14 +133,30 @@ export function toStablefordRules(
   return { pointsByRelation, floorPoints }
 }
 
+/**
+ * The competition's holes in published order.
+ *
+ * `hole_ordinal` is unique per ROUND, not per event, so a two-round event has
+ * two holes numbered 1. Filtering on ordinal alone would merge both rounds,
+ * interleave them by number, and re-rank stroke indexes across 36 holes —
+ * corrupting allocation. Rounds therefore scope the set first, and holes are
+ * ordered by (round, ordinal) so a multi-round competition plays in sequence.
+ */
 function holeSnapshots(
   snapshot: ScoringSnapshot,
+  roundIds: readonly string[],
   holeScope: number[] | null,
 ): HoleSnapshot[] {
+  const roundOrder = new Map(roundIds.map((id, i) => [id, i]))
   const scoped = snapshot.holes.filter(
-    (h) => holeScope === null || holeScope.length === 0 || holeScope.includes(h.hole_ordinal),
+    (h) =>
+      (roundIds.length === 0 || roundOrder.has(h.round_id)) &&
+      (holeScope === null || holeScope.length === 0 || holeScope.includes(h.hole_ordinal)),
   )
-  const ordered = [...scoped].sort((a, b) => a.hole_ordinal - b.hole_ordinal)
+  const ordered = [...scoped].sort((a, b) => {
+    const round = (roundOrder.get(a.round_id) ?? 0) - (roundOrder.get(b.round_id) ?? 0)
+    return round !== 0 ? round : a.hole_ordinal - b.hole_ordinal
+  })
   // Stroke indexes must be a permutation of 1..N for the competition's own
   // allocation set (§9.5). A full round already satisfies this; a subset is
   // re-ranked by its published indexes so allocation stays well-defined.
@@ -374,11 +390,15 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
     }
     const rules = parsed.data
 
-    const scopeRow = snapshot.competitionRounds.find(
+    // Every round this competition spans, in the order competition_rounds
+    // declares. A competition with no rows is event-wide (single round).
+    const compRounds = snapshot.competitionRounds.filter(
       (cr) => cr.competition_id === competition.id,
     )
+    const scopeRow = compRounds[0]
     const holes = holeSnapshots(
       snapshot,
+      compRounds.map((cr) => cr.round_id),
       scopeRow?.hole_scope ?? rules.holeScope ?? null,
     )
     const holeIds = new Set(holes.map((h) => h.id))
