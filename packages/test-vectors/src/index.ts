@@ -13,10 +13,12 @@ export type {
   AllocationVector,
   BestBallVector,
   CardEntry,
+  CountbackVector,
   CourseHandicapVector,
   GoldenVector,
   MatchAllocationVector,
   MatchVector,
+  MultiRoundVector,
   PairTeamHandicapVector,
   ParBogeyVector,
   PlayingHandicapRoundingVector,
@@ -36,9 +38,11 @@ export {
   courseHandicapVectors,
   roundingVectors,
 } from './vectors/course-handicap.ts'
+export { countbackVectors } from './vectors/countback.ts'
 export { deferredVectors } from './vectors/deferred.ts'
 export type { DeferredVector } from './vectors/deferred.ts'
 export { matchAllocationVectors, matchVectors } from './vectors/match-play.ts'
+export { multiRoundVectors } from './vectors/multi-round.ts'
 export { parBogeyVectors } from './vectors/par-bogey.ts'
 export { skinsVectors } from './vectors/skins.ts'
 export { stablefordVectors } from './vectors/stableford.ts'
@@ -57,7 +61,9 @@ import {
   courseHandicapVectors,
   roundingVectors,
 } from './vectors/course-handicap.ts'
+import { countbackVectors } from './vectors/countback.ts'
 import { matchAllocationVectors, matchVectors } from './vectors/match-play.ts'
+import { multiRoundVectors } from './vectors/multi-round.ts'
 import { parBogeyVectors } from './vectors/par-bogey.ts'
 import { skinsVectors } from './vectors/skins.ts'
 import { stablefordVectors } from './vectors/stableford.ts'
@@ -83,6 +89,8 @@ export const allVectors: GoldenVector[] = [
   ...skinsVectors,
   ...scrambleHandicapVectors,
   ...pairTeamHandicapVectors,
+  ...multiRoundVectors,
+  ...countbackVectors,
   ...statusBehaviorVectors,
   ...parBogeyVectors,
 ]

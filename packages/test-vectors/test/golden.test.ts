@@ -15,9 +15,11 @@ import {
   calculateBestBall,
   calculateMatch,
   calculateParBogey,
+  calculateMultiRound,
   calculateSkins,
   calculateStableford,
   calculateStrokePlay,
+  resolveCountback,
   calculateTeamAggregate,
   courseHandicapUnrounded,
   foursomesTeamHandicap,
@@ -73,6 +75,29 @@ function checkWarnings(
 
 function runVector(v: GoldenVector): void {
   switch (v.kind) {
+    case 'multi_round': {
+      const result = calculateMultiRound(v.input)
+      const { warningCodes, ...subset } = v.expected
+      expectSubset(result, subset)
+      checkWarnings(result.warnings, warningCodes)
+      return
+    }
+    case 'countback': {
+      const result = resolveCountback(v.input)
+      const { warningCodes, placements, ...subset } = v.expected
+      expectSubset(result, subset)
+      // Placements come back grouped by resolved order, not input order, so
+      // compare by entityId rather than position.
+      const byId = new Map(result.placements.map((p) => [p.entityId, p]))
+      expect(result.placements).toHaveLength(placements.length)
+      for (const expectedPlacement of placements) {
+        const actual = byId.get(expectedPlacement.entityId as string)
+        expect(actual, `placement for ${expectedPlacement.entityId}`).toBeDefined()
+        expectSubset(actual, expectedPlacement, `$.${expectedPlacement.entityId}`)
+      }
+      checkWarnings(result.warnings, warningCodes)
+      return
+    }
     case 'stroke_play': {
       const result = calculateStrokePlay(v.input)
       const { warningCodes, ...subset } = v.expected
@@ -209,7 +234,9 @@ describe('golden vector integrity', () => {
   })
 
   it('deferred entries document section, reason, and phase', () => {
-    expect(deferredVectors.length).toBeGreaterThan(0)
+    // The list is empty at present — every §20.2 bullet runs, either here or
+    // in tests/integration. This asserts the SHAPE of any future entry so a
+    // new deferral still has to explain itself; it must not require one.
     for (const d of deferredVectors) {
       expect(d.section).toContain('§')
       expect(d.reason.length).toBeGreaterThan(0)
@@ -226,11 +253,16 @@ describe('golden vectors (§20.2)', () => {
   }
 })
 
-describe('deferred §20.2 vectors (database layer / later phase)', () => {
-  for (const d of deferredVectors) {
-    // Documented SKIP: see src/vectors/deferred.ts for reason and phase.
-    it.skip(`${d.id} (${d.section}) — ${d.title} [${d.phase}]`, () => {
-      throw new Error(`deferred: ${d.reason}`)
-    })
-  }
-})
+// Declared only when something is actually deferred: an empty describe is a
+// vitest error, and the list is empty now that every §20.2 bullet runs.
+describe.skipIf(deferredVectors.length === 0)(
+  'deferred §20.2 vectors (database layer / later phase)',
+  () => {
+    for (const d of deferredVectors) {
+      // Documented SKIP: see src/vectors/deferred.ts for reason and phase.
+      it.skip(`${d.id} (${d.section}) — ${d.title} [${d.phase}]`, () => {
+        throw new Error(`deferred: ${d.reason}`)
+      })
+    }
+  },
+)

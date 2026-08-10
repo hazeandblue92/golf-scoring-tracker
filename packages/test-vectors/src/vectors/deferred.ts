@@ -19,15 +19,15 @@ export interface DeferredVector {
   phase: string
 }
 
-export const deferredVectors: DeferredVector[] = [
-  {
-    id: 'deferred-multi-round-dropped-round',
-    section: '§20.2 · §8.14',
-    title: 'Multi-round dropped-round (best r of n) aggregation',
-    reason:
-      'No multi-round aggregation module exists in packages/scoring yet; ' +
-      'the engine currently scores single rounds. The vector lands with the ' +
-      'best-r-of-n engine module so it can assert typed engine output.',
-    phase: 'Phase 3 (multi-round aggregation, countback/playoffs; §22)',
-  },
-]
+/**
+ * Empty by design: every §20.2 bullet now runs somewhere.
+ *
+ * The Phase 1 database and protocol vectors (idempotency retry, two-device
+ * conflict, stale projection, export hash repeat) run in tests/integration
+ * against the real stack, and the multi-round dropped-round vector landed with
+ * the best-r-of-n engine module as `multi-round-dropped-round-best-2-of-3`.
+ *
+ * Keep the machinery: a future §20.2 bullet that outruns the engine belongs
+ * here as a visible skip rather than an untested gap.
+ */
+export const deferredVectors: DeferredVector[] = []

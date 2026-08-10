@@ -13,12 +13,16 @@ import type {
   BestBallInput,
   BestBallRow,
   BestBallTeamHole,
+  CountbackInput,
+  CountbackPlacement,
   CourseHandicapInput,
   HoleSnapshot,
   IndividualHoleScore,
   MatchAllocationInput,
   MatchInput,
   MatchState,
+  MultiRoundInput,
+  MultiRoundRow,
   ParBogeyInput,
   ParBogeyRow,
   Rational,
@@ -184,7 +188,32 @@ export type PairTeamHandicapVector = VectorBase<
 
 // ── Union ───────────────────────────────────────────────────────────────────
 
+// ── Multi-round and tie-break vectors ───────────────────────────────────────
+
+/** Multi-round aggregation (§8.14): sums, match points, and best r of n. */
+export type MultiRoundVector = VectorBase<
+  'multi_round',
+  MultiRoundInput,
+  {
+    rows: Array<Partial<MultiRoundRow>>
+    warningCodes?: string[]
+  }
+>
+
+/** Countback tie resolution (§8.15) over the published competition order. */
+export type CountbackVector = VectorBase<
+  'countback',
+  CountbackInput,
+  {
+    placements: Array<Partial<CountbackPlacement>>
+    unresolved: boolean
+    warningCodes?: string[]
+  }
+>
+
 export type GoldenVector =
+  | CountbackVector
+  | MultiRoundVector
   | CourseHandicapVector
   | PlayingHandicapRoundingVector
   | AllocationVector
