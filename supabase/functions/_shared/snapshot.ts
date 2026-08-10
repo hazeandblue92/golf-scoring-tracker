@@ -26,6 +26,10 @@ export interface SnapshotEntry {
   course_handicap_unrounded: number | null
   playing_handicap: number | null
   flight_id: string | null
+  /** First round this entry may score; null means since the event opened. */
+  effective_from_round_id: string | null
+  /** The entry this one substitutes for (§8.14); never edits that entry. */
+  replaces_entry_id: string | null
 }
 
 export interface SnapshotTeam {
@@ -166,7 +170,8 @@ export async function loadScoringSnapshot(
       : Promise.resolve([]),
     selectAll<SnapshotEntry>(
       service, 'event_entries',
-      'id, event_id, participant_id, status, course_handicap_unrounded, playing_handicap, flight_id',
+      'id, event_id, participant_id, status, course_handicap_unrounded, ' +
+        'playing_handicap, flight_id, effective_from_round_id, replaces_entry_id',
       (q) => q.eq('event_id', eventId),
     ),
     selectAll<SnapshotTeam>(

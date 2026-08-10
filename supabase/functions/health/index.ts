@@ -56,7 +56,9 @@ Deno.serve(async (req: Request) => {
     appVersion: Deno.env.get('RELEASE_VERSION') ?? 'dev',
     edgeVersion: Deno.env.get('RELEASE_VERSION') ?? 'dev',
     engineVersion: ENGINE_VERSION,
-    schemaVersion: 20,
+    // Must equal the number of committed migrations; the Phase 4 operations
+    // integration test fails when this drifts.
+    schemaVersion: 21,
     authOk,
     dbOk,
     correlationId,

@@ -277,6 +277,22 @@ function matchSideCourseHandicap(
 }
 
 /**
+ * True when `roundId` falls at or after `fromRoundId` in the competition's
+ * declared round order. Used so a substitute contributes only the rounds it
+ * was actually eligible for (§8.14).
+ */
+function roundIsAtOrAfter(
+  compRounds: ReadonlyArray<{ round_id: string }>,
+  roundId: string,
+  fromRoundId: string,
+): boolean {
+  const at = compRounds.findIndex((cr) => cr.round_id === roundId)
+  const from = compRounds.findIndex((cr) => cr.round_id === fromRoundId)
+  if (at < 0 || from < 0) return true
+  return at >= from
+}
+
+/**
  * Re-rank rows inside each flight so every flight has its own rank 1
  * (§5.2 flight/division results). Rows the engine left unranked — withdrawn,
  * no-return, ineligible — stay unranked; they were never in contention.
@@ -1123,15 +1139,78 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
           ),
         }))
 
+        // §8.14 substitutions: a substitute is a NEW entry, so the slot it
+        // took over would otherwise appear as two half-finished entrants.
+        // Aggregate a chain under the entity of the entry it replaced, so the
+        // slot has one continuous total — while hole results stay attributed
+        // to whoever actually played that round.
+        const entityOfEntry = new Map<string, string>()
+        for (const entity of entities) {
+          if (entity.event_entry_id) entityOfEntry.set(entity.event_entry_id, entity.id)
+        }
+        const entryOfEntity = new Map<string, string>()
+        for (const entity of entities) {
+          if (entity.event_entry_id) entryOfEntity.set(entity.id, entity.event_entry_id)
+        }
+        const slotOf = (entityId: string): string => {
+          let entryId = entryOfEntity.get(entityId)
+          const seen = new Set<string>()
+          while (entryId && !seen.has(entryId)) {
+            seen.add(entryId)
+            const entry = snapshot.entries.find((e) => e.id === entryId)
+            const replaced = entry?.replaces_entry_id ?? null
+            if (!replaced) break
+            const replacedEntity = entityOfEntry.get(replaced)
+            if (!replacedEntity) break
+            entityId = replacedEntity
+            entryId = replaced
+          }
+          return entityId
+        }
+
+        // The handover cuts both ways. The incoming entry contributes nothing
+        // before its effective round, and the OUTGOING entry contributes
+        // nothing from that round on — it no longer holds the slot. Without
+        // this, both would submit a result for the same round and the
+        // aggregator would reject the slot outright.
+        const supersededFrom = new Map<string, string>()
+        for (const entry of snapshot.entries) {
+          if (entry.replaces_entry_id && entry.effective_from_round_id) {
+            supersededFrom.set(entry.replaces_entry_id, entry.effective_from_round_id)
+          }
+        }
+
         const byEntity = new Map<string, MultiRoundEntity>()
         for (const round of perRound) {
           if (round.result.provisional) provisional = true
           holeResults.push(...round.result.holeResults)
           for (const row of round.result.rows) {
-            let entity = byEntity.get(row.entityId)
+            const entryId = entryOfEntity.get(row.entityId)
+            const entry = entryId
+              ? snapshot.entries.find((e) => e.id === entryId)
+              : undefined
+            // An entry that had not joined yet contributes nothing to the
+            // rounds before its effective round — it did not play them, and a
+            // no-return there would wrongly cost the slot a counting round.
+            if (
+              entry?.effective_from_round_id &&
+              entry.effective_from_round_id !== round.roundId &&
+              !roundIsAtOrAfter(compRounds, round.roundId, entry.effective_from_round_id)
+            ) {
+              continue
+            }
+            const supersededAt = entryId ? supersededFrom.get(entryId) : undefined
+            if (
+              supersededAt &&
+              roundIsAtOrAfter(compRounds, round.roundId, supersededAt)
+            ) {
+              continue
+            }
+            const slot = slotOf(row.entityId)
+            let entity = byEntity.get(slot)
             if (!entity) {
-              entity = { entityId: row.entityId, rounds: [] }
-              byEntity.set(row.entityId, entity)
+              entity = { entityId: slot, rounds: [] }
+              byEntity.set(slot, entity)
             }
             ;(entity.rounds as RoundResult[]).push({
               roundId: round.roundId,
