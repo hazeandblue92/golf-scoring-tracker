@@ -31,6 +31,7 @@ import type {
   StablefordRow,
   StrokePlayInput,
   StrokePlayRow,
+  TeamAggregateInput,
 } from '@gtt/scoring'
 
 export interface VectorBase<Kind extends string, Input, Expected> {
@@ -95,6 +96,16 @@ export type StrokePlayVector = VectorBase<
 export type BestBallVector = VectorBase<
   'best_ball',
   BestBallInput,
+  {
+    rows: Array<Partial<BestBallRow>>
+    teamHoles?: Array<Partial<BestBallTeamHole>>
+    provisional?: boolean
+  }
+>
+
+export type TeamAggregateVector = VectorBase<
+  'team_aggregate',
+  TeamAggregateInput,
   {
     rows: Array<Partial<BestBallRow>>
     teamHoles?: Array<Partial<BestBallTeamHole>>
@@ -179,6 +190,7 @@ export type GoldenVector =
   | AllocationVector
   | StrokePlayVector
   | BestBallVector
+  | TeamAggregateVector
   | StablefordVector
   | ParBogeyVector
   | MatchVector

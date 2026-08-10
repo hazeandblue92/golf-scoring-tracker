@@ -60,6 +60,15 @@ export const teamConfigSchema = z
     path: ['bestK'],
   })
 
+/** Team aggregate is calculated from each member's individual hole score. */
+export const aggregateTeamConfigSchema = teamConfigSchema.refine(
+  (team) => team.scoreSource === 'individual',
+  {
+    message: 'team aggregate requires individual scoreSource',
+    path: ['scoreSource'],
+  },
+)
+
 /**
  * Points map keyed by relation to par: a signed integer ('-3'..'2') or a
  * nonnegative integer with a trailing '+' meaning "this relation and worse"
@@ -167,7 +176,7 @@ export const parBogeyRulesSchema = z.strictObject({
 export const aggregateRulesSchema = z.strictObject({
   format: z.literal('aggregate'),
   ...commonFields,
-  team: teamConfigSchema,
+  team: aggregateTeamConfigSchema,
 })
 
 // ── rules_json discriminated union ──────────────────────────────────────────

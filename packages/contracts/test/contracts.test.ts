@@ -59,6 +59,17 @@ const scramble = {
   },
 } as const
 
+const aggregate = {
+  format: 'aggregate',
+  ...common,
+  metric: 'gross',
+  team: {
+    teamSize: 4,
+    bestK: 4,
+    scoreSource: 'individual',
+  },
+} as const
+
 const UUID_A = '5f0f6f5e-1111-4a2b-8c3d-9e8f7a6b5c4d'
 const UUID_B = '5f0f6f5e-2222-4a2b-8c3d-9e8f7a6b5c4d'
 const UUID_C = '5f0f6f5e-3333-4a2b-8c3d-9e8f7a6b5c4d'
@@ -98,6 +109,10 @@ describe('rulesJsonSchema', () => {
 
   it('accepts a valid scramble configuration with team weights', () => {
     expect(rulesJsonSchema.safeParse(scramble).success).toBe(true)
+  })
+
+  it('accepts explicit hole-level all-scores-count team aggregate rules', () => {
+    expect(rulesJsonSchema.safeParse(aggregate).success).toBe(true)
   })
 
   it('accepts par_bogey with a points map and match with common fields only', () => {
@@ -249,6 +264,12 @@ describe('rulesJsonSchema', () => {
       rulesJsonSchema.safeParse({
         ...scramble,
         team: { ...scramble.team, bestK: 5 },
+      }).success,
+    ).toBe(false)
+    expect(
+      rulesJsonSchema.safeParse({
+        ...aggregate,
+        team: { ...aggregate.team, scoreSource: 'team_ball' },
       }).success,
     ).toBe(false)
   })

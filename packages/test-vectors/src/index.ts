@@ -25,6 +25,7 @@ export type {
   StablefordVector,
   StrokePlayVector,
   TeamHandicapExpectation,
+  TeamAggregateVector,
   VectorBase,
 } from './vectors/types.ts'
 export { scoresFor, skinsCard } from './vectors/types.ts'
@@ -41,6 +42,7 @@ export { matchAllocationVectors, matchVectors } from './vectors/match-play.ts'
 export { parBogeyVectors } from './vectors/par-bogey.ts'
 export { skinsVectors } from './vectors/skins.ts'
 export { stablefordVectors } from './vectors/stableford.ts'
+export { teamAggregateVectors } from './vectors/team-aggregate.ts'
 export { statusBehaviorVectors } from './vectors/status-behavior.ts'
 export { strokePlayVectors } from './vectors/stroke-play.ts'
 export {
@@ -59,6 +61,7 @@ import { matchAllocationVectors, matchVectors } from './vectors/match-play.ts'
 import { parBogeyVectors } from './vectors/par-bogey.ts'
 import { skinsVectors } from './vectors/skins.ts'
 import { stablefordVectors } from './vectors/stableford.ts'
+import { teamAggregateVectors } from './vectors/team-aggregate.ts'
 import { statusBehaviorVectors } from './vectors/status-behavior.ts'
 import { strokePlayVectors } from './vectors/stroke-play.ts'
 import {
@@ -73,6 +76,7 @@ export const allVectors: GoldenVector[] = [
   ...courseHandicapVectors,
   ...roundingVectors,
   ...bestBallVectors,
+  ...teamAggregateVectors,
   ...stablefordVectors,
   ...matchVectors,
   ...matchAllocationVectors,

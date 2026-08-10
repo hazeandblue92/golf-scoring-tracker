@@ -18,6 +18,7 @@ import {
   calculateSkins,
   calculateStableford,
   calculateStrokePlay,
+  calculateTeamAggregate,
   courseHandicapUnrounded,
   foursomesTeamHandicap,
   greensomesTeamHandicap,
@@ -105,6 +106,11 @@ function runVector(v: GoldenVector): void {
     }
     case 'best_ball': {
       const result = calculateBestBall(v.input)
+      expectSubset(result, v.expected)
+      return
+    }
+    case 'team_aggregate': {
+      const result = calculateTeamAggregate(v.input)
       expectSubset(result, v.expected)
       return
     }

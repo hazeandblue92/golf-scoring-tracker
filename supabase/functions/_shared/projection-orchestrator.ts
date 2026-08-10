@@ -17,6 +17,7 @@ import {
   calculateSkins,
   calculateStableford,
   calculateStrokePlay,
+  calculateTeamAggregate,
   calculateTeamBallTotals,
   playingHandicap,
   rational,
@@ -357,7 +358,11 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
           break
         }
 
-        case 'best_k': {
+        case 'best_k':
+        case 'aggregate': {
+          if (rules.format === 'aggregate' && rules.team.scoreSource !== 'individual') {
+            throw new RangeError('team aggregate requires individual member scores')
+          }
           const teams = entities
             .filter((e) => e.event_team_id)
             .map((e) => {
@@ -378,13 +383,22 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
                 }),
               }
             })
-          const result = calculateBestBall({
+          const commonInput = {
             holes,
             metric: metric as 'gross' | 'net',
-            bestK: rules.team.bestK,
             teams,
             phase,
-          })
+          }
+          const result = rules.format === 'aggregate'
+            ? calculateTeamAggregate({
+                ...commonInput,
+                teamSize: rules.team.teamSize,
+                bestK: rules.team.bestK,
+              })
+            : calculateBestBall({
+                ...commonInput,
+                bestK: rules.team.bestK,
+              })
           provisional = result.provisional
           warnings.push(...result.warnings.map((w) => ({ code: w.code, message: w.message })))
           rows = result.rows.map((r) => ({
@@ -396,7 +410,13 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
             resultSecondary: null,
             displayPrimary: displayTotal(r.total, parTotal),
             status: r.status,
-            detail: {},
+            detail: {
+              aggregation: rules.team.bestK === rules.team.teamSize
+                ? 'all_scores_count'
+                : 'best_k',
+              bestK: rules.team.bestK,
+              teamSize: rules.team.teamSize,
+            },
           }))
           holeResults = result.teamHoles.map((h) => ({
             entityId: entityByTeam.get(h.teamId) ?? h.teamId,
@@ -625,9 +645,8 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
         }
 
         default: {
-          // match / shamble / aggregate: the engine supports the calculation
-          // but the snapshot wiring (pairings brackets, shamble score source,
-          // multi-round aggregation) lands in Phase 2/3 (spec §22).
+          // Match and shamble calculations still need their format-specific
+          // snapshot wiring (pairings brackets and shamble score sources).
           warnings.push({
             code: 'ENGINE_FORMAT_DEFERRED',
             message: `format '${rules.format}' projection wiring is deferred to a later phase`,
