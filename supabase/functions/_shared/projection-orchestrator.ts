@@ -15,6 +15,7 @@ import {
   applyCountback,
   calculateBestBall,
   calculateMatch,
+  calculateMultiRound,
   calculateParBogey,
   matchStrokeAllocation,
   calculateSkins,
@@ -33,7 +34,10 @@ import {
   type IndividualHoleScore,
   type RoundingProfile,
   type MatchHoleInput,
+  type MultiRoundAggregation,
+  type MultiRoundEntity,
   type Rational,
+  type RoundResult,
   type SkinsRules,
   type StablefordRules,
   type TeamHoleScore,
@@ -272,6 +276,32 @@ function matchSideCourseHandicap(
   return null
 }
 
+/**
+ * The §8.14 aggregation a competition declares, or null when it is a single
+ * round. `metric` decides the basis: points tables rank high, strokes low.
+ */
+function multiRoundAggregation(
+  rules: { metric: 'gross' | 'net' | 'points'; multiRound?: { aggregation: string; count?: number } },
+): MultiRoundAggregation | null {
+  const config = rules.multiRound
+  if (!config) return null
+  const pointsBased = rules.metric === 'points'
+  switch (config.aggregation) {
+    case 'match_points':
+      return { kind: 'match_points' }
+    case 'best_r_of_n':
+      return {
+        kind: 'best_r_of_n',
+        count: config.count ?? 1,
+        basis: pointsBased ? 'points' : 'strokes',
+      }
+    case 'sum':
+      return pointsBased ? { kind: 'sum_points' } : { kind: 'sum_strokes' }
+    default:
+      return null
+  }
+}
+
 function teamScoresFor(
   snapshot: ScoringSnapshot,
   teamId: string,
@@ -396,13 +426,12 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
       (cr) => cr.competition_id === competition.id,
     )
     const scopeRow = compRounds[0]
-    const holes = holeSnapshots(
+    const roundIds = compRounds.map((cr) => cr.round_id)
+    const allHoles = holeSnapshots(
       snapshot,
-      compRounds.map((cr) => cr.round_id),
+      roundIds,
       scopeRow?.hole_scope ?? rules.holeScope ?? null,
     )
-    const holeIds = new Set(holes.map((h) => h.id))
-    const parTotal = holes.reduce((sum, h) => sum + h.par, 0)
 
     // entity id lookups: engine works in entry/team ids, projections store
     // competition_entities.id.
@@ -413,13 +442,25 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
       if (e.event_team_id) entityByTeam.set(e.event_team_id, e.id)
     }
 
-    let rows: ProjectionRow[] = []
-    let holeResults: ProjectionHoleResult[] = []
-    let provisional = false
-
     const metric = rules.metric === 'points' ? 'net' : rules.metric
 
-    try {
+    /**
+     * One scoring pass over a hole set.
+     *
+     * For a single-round competition that is the whole competition. For a
+     * multi-round one it is a SINGLE round, so §8.14 can aggregate rounds that
+     * were each scored under their own handicap allocation — the alternative,
+     * scoring one merged 36-hole card, would spread a player's Playing
+     * Handicap across both rounds and allocate strokes to stroke indexes
+     * 1..36 that no scorecard has.
+     */
+    const computeForHoles = (holes: HoleSnapshot[]) => {
+      const holeIds = new Set(holes.map((h) => h.id))
+      const parTotal = holes.reduce((sum, h) => sum + h.par, 0)
+      let rows: ProjectionRow[] = []
+      let holeResults: ProjectionHoleResult[] = []
+      let provisional = false
+
       switch (rules.format) {
         case 'individual_stroke': {
           const entries = entities
@@ -956,6 +997,94 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
           provisional = true
         }
       }
+
+      return { rows, holeResults, provisional }
+    }
+
+    let rows: ProjectionRow[] = []
+    let holeResults: ProjectionHoleResult[] = []
+    let provisional = false
+
+    try {
+      // §8.14 multi-round: score each round on its own holes, then aggregate.
+      // Only competitions that actually span rounds AND declare an aggregation
+      // take this path; a one-round competition is unchanged.
+      const aggregation = multiRoundAggregation(rules)
+      if (aggregation && compRounds.length > 1) {
+        const perRound = compRounds.map((cr) => ({
+          roundId: cr.round_id,
+          weight: Number(cr.weight ?? 1),
+          // Each round gets its OWN holeSnapshots pass so ordinals restart at 1
+          // and stroke indexes re-rank within that round. Filtering the merged
+          // set instead would leave round two allocating on indexes 19..36.
+          result: computeForHoles(
+            holeSnapshots(snapshot, [cr.round_id], cr.hole_scope ?? rules.holeScope ?? null),
+          ),
+        }))
+
+        const byEntity = new Map<string, MultiRoundEntity>()
+        for (const round of perRound) {
+          if (round.result.provisional) provisional = true
+          holeResults.push(...round.result.holeResults)
+          for (const row of round.result.rows) {
+            let entity = byEntity.get(row.entityId)
+            if (!entity) {
+              entity = { entityId: row.entityId, rounds: [] }
+              byEntity.set(row.entityId, entity)
+            }
+            ;(entity.rounds as RoundResult[]).push({
+              roundId: round.roundId,
+              value: row.resultPrimary,
+              weight: round.weight,
+              status:
+                row.status === 'complete'
+                  ? 'complete'
+                  : row.status === 'provisional'
+                    ? 'provisional'
+                    : (row.status as RoundResult['status']),
+            })
+          }
+        }
+
+        const aggregated = calculateMultiRound({
+          entities: [...byEntity.values()],
+          aggregation,
+          phase,
+        })
+        warnings.push(
+          ...aggregated.warnings.map((w) => ({ code: w.code, message: w.message })),
+        )
+        if (aggregated.provisional) provisional = true
+
+        rows = aggregated.rows.map((row) => ({
+          entityId: row.entityId,
+          rank: row.rank,
+          isTied: row.isTied,
+          thru: row.roundsCounted,
+          resultPrimary: row.total,
+          resultSecondary: row.roundsPlayed,
+          displayPrimary: row.total === null ? null : String(row.total),
+          status: row.status,
+          detail: {
+            aggregation: aggregation.kind,
+            roundsPlayed: row.roundsPlayed,
+            roundsCounted: row.roundsCounted,
+            // Dropped rounds stay visible: §8.14 forbids deleted rows
+            // rewriting history, so the scorecard can strike them through.
+            rounds: row.contributions.map((c) => ({
+              roundId: c.roundId,
+              value: c.value,
+              weight: c.weight,
+              counted: c.counted,
+            })),
+          },
+        }))
+      } else {
+        const single = computeForHoles(allHoles)
+        rows = single.rows
+        holeResults = single.holeResults
+        provisional = single.provisional
+      }
     } catch (err) {
       warnings.push({
         code: 'ENGINE_ERROR',
@@ -987,7 +1116,8 @@ export function buildProjections(snapshot: ScoringSnapshot): ProjectionPayload {
       } else {
         const pointsFormat = rules.metric === 'points' || rules.format === 'stableford'
         const byEntity = new Map<string, Array<number | null>>()
-        const holeOrder = holes.map((h) => h.id)
+        // Published order across every round the competition spans.
+        const holeOrder = allHoles.map((h) => h.id)
         const indexOfHole = new Map(holeOrder.map((id, i) => [id, i]))
 
         for (const result of holeResults) {

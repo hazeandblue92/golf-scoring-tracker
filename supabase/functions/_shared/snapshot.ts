@@ -101,6 +101,8 @@ export interface ScoringSnapshot {
     competition_id: string
     round_id: string
     hole_scope: number[] | null
+    /** Per-round weight applied by §8.14 aggregation; defaults to 1. */
+    weight: number | null
   }>
   competitionEntities: SnapshotCompetitionEntity[]
   matches: SnapshotMatch[]
@@ -166,8 +168,13 @@ export async function loadScoringSnapshot(
       'id, event_id, name, format, metric, status, rules_schema_version, rules_json, engine_version',
       (q) => q.eq('event_id', eventId).order('sort_order'),
     ),
-    selectAll<{ competition_id: string; round_id: string; hole_scope: number[] | null }>(
-      service, 'competition_rounds', 'competition_id, round_id, hole_scope',
+    selectAll<{
+      competition_id: string
+      round_id: string
+      hole_scope: number[] | null
+      weight: number | null
+    }>(
+      service, 'competition_rounds', 'competition_id, round_id, hole_scope, weight',
       (q) => (roundIds.length ? q.in('round_id', roundIds) : q.limit(0)),
     ),
     selectAll<SnapshotIndividualScore>(

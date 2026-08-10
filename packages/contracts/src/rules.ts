@@ -35,6 +35,30 @@ export const handicapConfigSchema = z.strictObject({
   allocation: z.literal('stroke_index'),
 })
 
+/**
+ * Multi-round aggregation (§8.14): "sum of stroke totals, sum of points, match
+ * points table, and best r of n rounds".
+ *
+ * This lives in rules_json, not on competition_rounds, because it is one
+ * decision for the whole competition rather than a property of each round —
+ * and because rules_json is what publish freezes. Per-round WEIGHT genuinely
+ * is per round and stays on competition_rounds.
+ */
+export const multiRoundConfigSchema = z
+  .strictObject({
+    aggregation: z.enum(['sum', 'best_r_of_n', 'match_points']),
+    /** Rounds that count. Required for best_r_of_n, meaningless otherwise. */
+    count: z.number().int().min(1).optional(),
+  })
+  .refine(
+    (config) => config.aggregation !== 'best_r_of_n' || config.count !== undefined,
+    { message: 'best_r_of_n requires the number of rounds to count', path: ['count'] },
+  )
+  .refine(
+    (config) => config.aggregation === 'best_r_of_n' || config.count === undefined,
+    { message: 'count applies only to best_r_of_n', path: ['count'] },
+  )
+
 export const tiesConfigSchema = z.strictObject({
   mode: z.enum(['tied', 'countback', 'playoff']),
   /** Countback segments in order, e.g. ['last_9','last_6','last_3','hole_18']. */
@@ -118,6 +142,8 @@ const commonFields = {
   ties: tiesConfigSchema,
   incomplete: incompleteConfigSchema,
   visibility: z.enum(['league', 'public', 'organizers']),
+  /** Present only when the competition spans more than one round (§8.14). */
+  multiRound: multiRoundConfigSchema.optional(),
 } as const
 
 // ── Format variants ─────────────────────────────────────────────────────────
