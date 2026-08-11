@@ -17,6 +17,23 @@ export type CanonicalValue =
   | CanonicalValue[]
   | { [key: string]: CanonicalValue }
 
+/**
+ * Convert a computed numeric result into the canonical hash domain.
+ *
+ * Integers retain the established JSON-number representation. Decimal results
+ * (for example, a weighted multi-round total) are strings so canonicalJson
+ * never serializes a floating-point number directly. ECMAScript's Number
+ * string conversion is a specified shortest round-trip representation, which
+ * also matches the JSON numeric text sent to the projection publisher.
+ */
+export function canonicalNumericResult(value: number | null): number | string | null {
+  if (value === null) return null
+  if (!Number.isFinite(value)) {
+    throw new RangeError(`canonical numeric result must be finite, got ${value}`)
+  }
+  return Number.isSafeInteger(value) ? value : String(value)
+}
+
 export function canonicalJson(value: CanonicalValue): string {
   if (value === null || typeof value === 'boolean') return JSON.stringify(value)
   if (typeof value === 'number') {

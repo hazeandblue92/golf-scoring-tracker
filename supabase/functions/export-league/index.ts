@@ -7,6 +7,7 @@ import {
   newCorrelationId,
   readJsonBody,
   rejected,
+  requireMfa,
   requireUser,
   serviceClient,
   sha256Hex,
@@ -34,6 +35,8 @@ Deno.serve(async (req: Request) => {
   }
   const caller = await requireUser(req, correlationId)
   if (caller instanceof Response) return caller
+  const mfaGate = requireMfa(caller, correlationId)
+  if (mfaGate) return mfaGate
   const parsed = exportLeagueRequestSchema.safeParse(await readJsonBody(req))
   if (!parsed.success) {
     return rejected(400, 'SNAPSHOT_INVALID', correlationId,

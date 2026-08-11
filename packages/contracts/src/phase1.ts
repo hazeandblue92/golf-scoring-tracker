@@ -183,6 +183,15 @@ export type FinalizeCompetitionRequest = z.infer<
   typeof finalizeCompetitionRequestSchema
 >
 
+export const reopenCompetitionRequestSchema = z.strictObject({
+  competitionId: z.uuid(),
+  reason: z.string().trim().min(3).max(500),
+})
+
+export type ReopenCompetitionRequest = z.infer<
+  typeof reopenCompetitionRequestSchema
+>
+
 export const exportLeagueRequestSchema = z.strictObject({
   leagueId: z.uuid(),
   eventId: z.uuid().optional(),

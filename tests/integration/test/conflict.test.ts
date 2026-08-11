@@ -29,6 +29,14 @@ interface SubmitScoreBody {
   projectionStatus?: string
 }
 
+interface FinalizeBody {
+  status: string
+  missingScores?: number
+  openConflicts?: number
+  unattestedCards?: number
+  correlationId: string
+}
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -513,5 +521,35 @@ describe('deferred-two-device-conflict (spec §20.2, §7.2, §10.4)', () => {
     expect(score!.revision).toBe(2)
     expect(score!.entered_by).toBe(fx.scorer.profileId)
     expect(await eventRevision()).toBe(3)
+  }, HTTP_TIMEOUT_MS)
+
+  it('AC-009: finalization refuses every unresolved conflict without an explicit override', async () => {
+    const openConflicts = await conflictRows(holeOne().id)
+    expect(openConflicts).toHaveLength(3)
+    expect(openConflicts.every((row) => row.status === 'open')).toBe(true)
+
+    const res = await callFunction<FinalizeBody>(
+      'finalize-competition',
+      {
+        competitionId: fx.competitions.grossId,
+        overrideReason: null,
+      },
+      fx.director.accessToken,
+    )
+
+    expect(res.status, JSON.stringify(res.body)).toBe(409)
+    expect(res.body.status).toBe('blocked')
+    expect(res.body.openConflicts).toBe(3)
+    expect(res.body.missingScores).toBeGreaterThan(0)
+
+    const { data, error } = await fx.service
+      .from('competitions')
+      .select('status,finalized_at,final_result_hash')
+      .eq('id', fx.competitions.grossId)
+      .single()
+    if (error) throw new Error(`competition read failed — ${error.message}`)
+    expect(data.status).not.toBe('finalized')
+    expect(data.finalized_at).toBeNull()
+    expect(data.final_result_hash).toBeNull()
   }, HTTP_TIMEOUT_MS)
 })

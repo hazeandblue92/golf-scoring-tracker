@@ -105,7 +105,9 @@ describe('mid-event substitution (§8.14)', () => {
           rounding: 'half_up_toward_positive_infinity',
           matchNormalizeFromLowest: false, allocation: 'stroke_index',
         },
-        ties: { mode: 'tied', sequence: [] },
+        // Both slots finish on 162. Countback therefore has to follow the
+        // substitute's round-two hole results back to the original slot.
+        ties: { mode: 'countback', sequence: ['last_9'] },
         incomplete: { live: 'provisional', final: 'no_return' },
         visibility: 'league',
         multiRound: { aggregation: 'sum' },
@@ -131,7 +133,8 @@ describe('mid-event substitution (§8.14)', () => {
     if (ents.error) throw ents.error
 
     // Round 1: the ORIGINAL player scores 4s (72). Round 2: the SUBSTITUTE
-    // scores 5s (90). The other entrant plays both rounds in 6s (108 each).
+    // scores 5s (90). The other entrant scores 5s (90) then 4s (72), tying
+    // the substituted slot on 162 but winning the declared last-nine countback.
     const score = async (roundId: string, entryId: string, holeId: string, gross: number) => {
       const res = await callFunction<{ status: string }>(
         'submit-score',
@@ -149,9 +152,9 @@ describe('mid-event substitution (§8.14)', () => {
 
     for (let i = 0; i < 18; i += 1) {
       await score(fx.roundId, originalEntryId, fx.holes[i].id, 4)
-      await score(fx.roundId, fx.entries[1].entryId, fx.holes[i].id, 6)
+      await score(fx.roundId, fx.entries[1].entryId, fx.holes[i].id, 5)
       await score(roundTwoId, substituteEntryId, roundTwoHoles[i].id, 5)
-      await score(roundTwoId, fx.entries[1].entryId, roundTwoHoles[i].id, 6)
+      await score(roundTwoId, fx.entries[1].entryId, roundTwoHoles[i].id, 4)
     }
   }, 300_000)
 
@@ -187,13 +190,25 @@ describe('mid-event substitution (§8.14)', () => {
     )
     expect(substituteEntity).toBeUndefined()
 
-    // The continuing player is unaffected: 108 + 108.
-    const other = rows.find((r) => Number(r.result_primary) === 216)
-    expect(other, 'the player who played both rounds totals 216').toBeDefined()
+    // The continuing player is unaffected: 90 + 72 = 162. Both rows remain;
+    // the substitute itself is the only entity collapsed into its slot.
+    expect(rows.filter((r) => Number(r.result_primary) === 162)).toHaveLength(2)
+    expect(Number(slot?.rank)).toBe(2)
+  })
 
-    // 162 beats 216, so the substituted slot wins — proving both rounds
-    // counted rather than the slot being written off at the handover.
-    expect(Number(slot?.rank)).toBe(1)
+  it('maps substitute hole values to the original slot for pipeline countback', async () => {
+    const rows = await latestRows()
+    const slot = rows.find((row) => row.entity_id === slotEntityId)
+    const continuing = rows.find((row) => row.entity_id !== slotEntityId)
+
+    // Both aggregate to 162, but the continuing player shoots 36 over the
+    // final nine versus the substitute's 45. Without the countback-only slot
+    // mapping, those final-nine values live under the substitute entity and
+    // the original slot incorrectly remains tied.
+    expect(Number(slot?.result_primary)).toBe(162)
+    expect(Number(continuing?.result_primary)).toBe(162)
+    expect(Number(continuing?.rank)).toBe(1)
+    expect(Number(slot?.rank)).toBe(2)
   })
 
   it('leaves round one attributed to the player who actually played it', async () => {
@@ -226,5 +241,45 @@ describe('mid-event substitution (§8.14)', () => {
       .maybeSingle()
     expect(entry?.participant_id).toBe(fx.entries[0].participantId)
     expect(entry?.replaces_entry_id).toBeNull()
+  })
+
+  it('finalizes against the four effective entry-round cards, not six historical rows', async () => {
+    const cards = [
+      { roundId: fx.roundId, entryId: originalEntryId },
+      { roundId: roundTwoId, entryId: substituteEntryId },
+      { roundId: fx.roundId, entryId: fx.entries[1].entryId },
+      { roundId: roundTwoId, entryId: fx.entries[1].entryId },
+    ]
+    for (const card of cards) {
+      const attested = await callFunction<{ status: string }>(
+        'attest-scorecard',
+        {
+          roundId: card.roundId,
+          targetKind: 'individual',
+          targetId: card.entryId,
+          attestationType: 'director_override',
+          reason: 'Integration finalization proof',
+        },
+        fx.director.accessToken,
+      )
+      expect(attested.status, JSON.stringify(attested.body)).toBe(200)
+      expect(attested.body.status).toBe('attested')
+    }
+
+    const finalized = await callFunction<{
+      status: string
+      missingScoreOverrides?: number
+      attestationOverrides?: number
+    }>(
+      'finalize-competition',
+      { competitionId, overrideReason: null },
+      fx.director.accessToken,
+    )
+    expect(finalized.status, JSON.stringify(finalized.body)).toBe(200)
+    expect(finalized.body).toMatchObject({
+      status: 'finalized',
+      missingScoreOverrides: 0,
+      attestationOverrides: 0,
+    })
   })
 })

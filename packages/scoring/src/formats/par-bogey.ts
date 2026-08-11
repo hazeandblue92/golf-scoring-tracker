@@ -42,8 +42,22 @@ export interface ParBogeyRow {
   status: EntityStatus | 'provisional' | 'complete'
 }
 
+export interface ParBogeyHoleResult {
+  entryId: string
+  holeId: string
+  /** Format outcome for this hole: win, half, loss, or unresolved/excluded. */
+  outcome: 1 | 0 | -1 | null
+  gross: number | null
+  /** Null only when a net competition has no valid Playing Handicap. */
+  strokesReceived: number | null
+  net: number | null
+  status: HoleScoreStatus
+  provisional: boolean
+}
+
 export interface ParBogeyResult {
   rows: ParBogeyRow[]
+  holeResults: ParBogeyHoleResult[]
   warnings: EngineWarning[]
   provisional: boolean
 }
@@ -62,6 +76,7 @@ interface EntryComputation {
   thru: number
   provisional: boolean
   rankable: boolean
+  holeResults: ParBogeyHoleResult[]
 }
 
 export function calculateParBogey(input: ParBogeyInput): ParBogeyResult {
@@ -85,6 +100,7 @@ export function calculateParBogey(input: ParBogeyInput): ParBogeyResult {
   }))
   return {
     rows,
+    holeResults: computations.flatMap((c) => c.holeResults),
     warnings,
     provisional: computations.some((c) => c.provisional),
   }
@@ -120,6 +136,7 @@ function computeEntry(
     }
   }
   const byHole = latestScores(entry.scores)
+  const holeResults: ParBogeyHoleResult[] = []
   let result = 0
   let thru = 0
   let provisional = false
@@ -129,14 +146,26 @@ function computeEntry(
     if (handicapMissing) {
       // Never coerce strokes received to zero; the entry stays
       // provisional and unranked until a handicap exists.
+      const computed = computeHole(hole, score, 0)
+      holeResults.push({
+        entryId: entry.entryId,
+        holeId: hole.id,
+        outcome: null,
+        gross: computed.gross,
+        strokesReceived: null,
+        net: null,
+        status: computed.status,
+        provisional: active,
+      })
       if (active) provisional = true
       continue
     }
     const strokes = strokesByHole?.get(hole.id) ?? 0
     const computed = computeHole(hole, score, strokes)
-    const outcome = holeResultFor(hole, computed, input, active)
-    if (outcome.result !== null) result += outcome.result
-    if (outcome.provisional) provisional = true
+    const holeResult = holeResultFor(entry.entryId, hole, computed, input, active)
+    holeResults.push(holeResult)
+    if (holeResult.outcome !== null) result += holeResult.outcome
+    if (holeResult.provisional) provisional = true
   }
   return {
     entry,
@@ -144,39 +173,49 @@ function computeEntry(
     thru,
     provisional,
     rankable: active && !handicapMissing,
+    holeResults,
   }
 }
 
 function holeResultFor(
+  entryId: string,
   hole: HoleSnapshot,
   computed: HoleComputation,
   input: ParBogeyInput,
   active: boolean,
-): { result: number | null; provisional: boolean } {
+): ParBogeyHoleResult {
+  const base = {
+    entryId,
+    holeId: hole.id,
+    gross: computed.gross,
+    strokesReceived: computed.strokesReceived,
+    net: computed.net,
+    status: computed.status,
+  }
   if (computed.pending) {
     if (input.phase === 'live') {
       // A withdrawn/DQ entity's unplayed holes never pin the board.
-      return { result: null, provisional: active }
+      return { ...base, outcome: null, provisional: active }
     }
     // Finalization: an unreturned hole is a no-score, which loses (-1).
     return active
-      ? { result: -1, provisional: false }
-      : { result: null, provisional: false }
+      ? { ...base, outcome: -1, provisional: false }
+      : { ...base, outcome: null, provisional: false }
   }
   if (computed.status === 'complete') {
     const metricScore = input.metric === 'net' ? computed.net : computed.gross
     if (metricScore === null) {
       throw new RangeError(`complete hole ${hole.id} lacks a metric score`)
     }
-    if (metricScore < hole.par) return { result: 1, provisional: false }
-    if (metricScore === hole.par) return { result: 0, provisional: false }
-    return { result: -1, provisional: false }
+    if (metricScore < hole.par) return { ...base, outcome: 1, provisional: false }
+    if (metricScore === hole.par) return { ...base, outcome: 0, provisional: false }
+    return { ...base, outcome: -1, provisional: false }
   }
   if (LOSS_STATUSES.has(computed.status)) {
-    return { result: -1, provisional: false }
+    return { ...base, outcome: -1, provisional: false }
   }
   // Hole-level withdrawn/disqualified: terminal, excluded from the sum.
-  return { result: null, provisional: false }
+  return { ...base, outcome: null, provisional: false }
 }
 
 /** Latest-revision score per hole; earlier revisions are superseded facts. */

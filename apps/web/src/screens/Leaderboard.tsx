@@ -73,11 +73,25 @@ export function Leaderboard() {
   const flightIdsInPlay = useMemo(() => {
     const ids = new Set<string>();
     for (const row of query.data?.rows ?? []) {
-      const flightId = (row.detail_json as { flightId?: string } | null)?.flightId;
+      const flightId = flightIdFrom(row.detail_json);
       if (flightId) ids.add(flightId);
     }
     return ids;
   }, [query.data]);
+  const selectableFlightIds = useMemo(() => new Set(
+    (query.data?.flights ?? [])
+      .filter((flight) => flightIdsInPlay.has(flight.id))
+      .map((flight) => flight.id),
+  ), [flightIdsInPlay, query.data]);
+
+  useEffect(() => {
+    setFlightFilter('all');
+  }, [competitionId, eventId]);
+
+  useEffect(() => {
+    setFlightFilter((current) =>
+      current === 'all' || selectableFlightIds.has(current) ? current : 'all');
+  }, [selectableFlightIds]);
 
   if (query.isLoading) return <div className="screen"><div className="skeleton skeleton--rows" /></div>;
   if (!query.data) return <p className="form-message form-message--error">Leaderboard unavailable. The last saved scorecard remains authoritative.</p>;
@@ -87,9 +101,8 @@ export function Leaderboard() {
   const lag = event.scoring_revision - (projection?.event_revision ?? 0);
   const resultLabel = competition.metric === 'points' ? 'Points' : competition.metric === 'net' ? 'Net' : 'Gross';
   const entityLabel = ['best_k', 'aggregate', 'scramble', 'foursomes', 'greensomes', 'chapman', 'shamble'].includes(competition.format) ? 'Team' : 'Player';
-  const visibleRows = flightFilter === 'all'
-    ? rows
-    : rows.filter((row) => (row.detail_json as { flightId?: string } | null)?.flightId === flightFilter);
+  const visibleRows = rowsForDisplay(rows, flightFilter, competition.metric, competition.format);
+  const selectedFlightName = flights.find((flight) => flight.id === flightFilter)?.name;
 
   return (
     <div className="screen board-screen">
@@ -126,7 +139,7 @@ export function Leaderboard() {
         </div>
       )}
 
-      <div className="leaderboard" role="table" aria-label={`${competition.name} standings`}>
+      <div className="leaderboard" role="table" aria-label={`${competition.name} ${selectedFlightName ?? 'overall'} standings`}>
         <div className="leaderboard-head" role="row"><span role="columnheader">Rank</span><span role="columnheader">{entityLabel}</span><span role="columnheader">Thru</span><span role="columnheader">{resultLabel}</span></div>
         {visibleRows.length === 0 ? <div className="empty-state"><h2>Waiting for the first score</h2><p>This board refreshes automatically and also polls if live updates are interrupted.</p></div> : visibleRows.map((row) => {
           const scorecardPath = row.entryId
@@ -135,7 +148,7 @@ export function Leaderboard() {
               ? `/events/${eventId}/team-scorecard/${row.teamId}`
               : null;
           return <div className="leaderboard-row" role="row" key={row.entity_id}>
-            <span role="cell" className="rank">{row.rank === null ? '—' : `${row.is_tied ? 'T' : ''}${row.rank}`}</span>
+            <span role="cell" className="rank">{row.displayRank === null ? '—' : `${row.displayIsTied ? 'T' : ''}${row.displayRank}`}</span>
             <span role="cell">
               {scorecardPath
                 ? <Link className="leaderboard-name-link" to={scorecardPath}><strong>{row.name}</strong><small>{row.status}</small></Link>
@@ -153,4 +166,129 @@ export function Leaderboard() {
 
 function relationName(value: { display_name: string } | { display_name: string }[] | null) {
   return (Array.isArray(value) ? value[0]?.display_name : value?.display_name) ?? 'Player';
+}
+
+interface BoardRow {
+  entity_id: string;
+  rank: number | null;
+  is_tied: boolean;
+  thru: number | null;
+  result_primary: number | null;
+  status: string;
+  detail_json: unknown;
+  entryId: string | null;
+  teamId: string | null;
+  name: string;
+}
+
+interface Placement {
+  rank: number | null;
+  isTied: boolean;
+}
+
+const displayNameCollator = new Intl.Collator('en-US', {
+  numeric: true,
+  sensitivity: 'base',
+});
+
+function flightIdFrom(detail: unknown): string | null {
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return null;
+  const flightId = (detail as Record<string, unknown>).flightId;
+  return typeof flightId === 'string' ? flightId : null;
+}
+
+function rowsForDisplay(
+  rows: readonly BoardRow[],
+  flightFilter: string,
+  metric: string,
+  format: string,
+) {
+  const filtered = flightFilter === 'all'
+    ? [...rows]
+    : rows.filter((row) => flightIdFrom(row.detail_json) === flightFilter);
+  const fallback = overallPlacements(
+    rows,
+    metric === 'points' || format === 'stableford' || format === 'par_bogey'
+      ? 'desc'
+      : 'asc',
+  );
+
+  return filtered.map((row) => {
+    if (flightFilter !== 'all') {
+      return { ...row, displayRank: row.rank, displayIsTied: row.is_tied };
+    }
+    const detailRank = overallRankFrom(row.detail_json);
+    const detailTied = overallIsTiedFrom(row.detail_json);
+    const fallbackPlacement = fallback.get(row.entity_id) ?? { rank: null, isTied: false };
+    return {
+      ...row,
+      displayRank: detailRank === undefined ? fallbackPlacement.rank : detailRank,
+      displayIsTied: detailTied ?? fallbackPlacement.isTied,
+    };
+  }).sort((left, right) => {
+    if (left.displayRank === null && right.displayRank !== null) return 1;
+    if (left.displayRank !== null && right.displayRank === null) return -1;
+    if (left.displayRank !== right.displayRank) {
+      return (left.displayRank as number) - (right.displayRank as number);
+    }
+    const byName = displayNameCollator.compare(left.name, right.name);
+    return byName !== 0 ? byName : left.entity_id.localeCompare(right.entity_id);
+  });
+}
+
+function overallPlacements(
+  rows: readonly BoardRow[],
+  direction: 'asc' | 'desc',
+): Map<string, Placement> {
+  const ranked = rows
+    .filter((row) => row.rank !== null && row.result_primary !== null)
+    .toSorted((left, right) => {
+      const byResult = direction === 'asc'
+        ? (left.result_primary as number) - (right.result_primary as number)
+        : (right.result_primary as number) - (left.result_primary as number);
+      return byResult !== 0 ? byResult : left.entity_id.localeCompare(right.entity_id);
+    });
+  const resultCounts = new Map<number, number>();
+  for (const row of ranked) {
+    const result = row.result_primary as number;
+    resultCounts.set(result, (resultCounts.get(result) ?? 0) + 1);
+  }
+
+  const placements = new Map<string, Placement>();
+  let previousResult: number | undefined;
+  let previousRank = 1;
+  for (const [index, row] of ranked.entries()) {
+    const result = row.result_primary as number;
+    const rank = result === previousResult ? previousRank : index + 1;
+    placements.set(row.entity_id, {
+      rank,
+      isTied: (resultCounts.get(result) ?? 0) > 1,
+    });
+    previousResult = result;
+    previousRank = rank;
+  }
+  for (const row of rows) {
+    if (!placements.has(row.entity_id)) {
+      placements.set(row.entity_id, { rank: null, isTied: false });
+    }
+  }
+  return placements;
+}
+
+function overallRankFrom(detail: unknown): number | null | undefined {
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return undefined;
+  const record = detail as Record<string, unknown>;
+  if (!Object.hasOwn(record, 'overallRank')) return undefined;
+  if (record.overallRank === null) return null;
+  return typeof record.overallRank === 'number'
+    && Number.isInteger(record.overallRank)
+    && record.overallRank > 0
+    ? record.overallRank
+    : undefined;
+}
+
+function overallIsTiedFrom(detail: unknown): boolean | undefined {
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return undefined;
+  const value = (detail as Record<string, unknown>).overallIsTied;
+  return typeof value === 'boolean' ? value : undefined;
 }

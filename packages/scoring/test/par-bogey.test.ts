@@ -53,6 +53,14 @@ function row(result: ParBogeyResult, entryId: string) {
   return found
 }
 
+function holeResult(result: ParBogeyResult, entryId: string, holeId: string) {
+  const found = result.holeResults.find(
+    (hole) => hole.entryId === entryId && hole.holeId === holeId,
+  )
+  if (found === undefined) throw new Error(`no hole result for ${entryId}/${holeId}`)
+  return found
+}
+
 // ── cumulative result with no-score holes (spec §8.12) ──────────────────────
 
 describe('par/bogey cumulative result (spec §8.12)', () => {
@@ -79,6 +87,30 @@ describe('par/bogey cumulative result (spec §8.12)', () => {
     })
     expect(row(result, 'A').result).toBe(1 + 0 - 1 - 1 - 1 + 0 + 0 + 0 + 0) // -2
     expect(row(result, 'B').result).toBe(1)
+    expect(result.holeResults).toHaveLength(18)
+    expect(holeResult(result, 'A', 'h1')).toEqual({
+      entryId: 'A',
+      holeId: 'h1',
+      outcome: 1,
+      gross: 3,
+      strokesReceived: 0,
+      net: 3,
+      status: 'complete',
+      provisional: false,
+    })
+    expect(holeResult(result, 'A', 'h2').outcome).toBe(0)
+    expect(holeResult(result, 'A', 'h3').outcome).toBe(-1)
+    expect(holeResult(result, 'A', 'h4')).toMatchObject({
+      outcome: -1,
+      gross: null,
+      net: null,
+      status: 'no_score',
+      provisional: false,
+    })
+    expect(holeResult(result, 'A', 'h5')).toMatchObject({
+      outcome: -1,
+      status: 'picked_up',
+    })
     expect(result.provisional).toBe(false)
     expect(result.warnings).toEqual([])
   })
@@ -135,6 +167,22 @@ describe('par/bogey net metric', () => {
     // net par halves.
     expect(row(gross, 'A').result).toBe(-1 + 0)
     expect(row(net, 'A').result).toBe(0 + 0)
+    expect(holeResult(gross, 'A', 'h1')).toMatchObject({
+      outcome: -1,
+      gross: 5,
+      strokesReceived: 0,
+      net: 5,
+      status: 'complete',
+      provisional: false,
+    })
+    expect(holeResult(net, 'A', 'h1')).toMatchObject({
+      outcome: 0,
+      gross: 5,
+      strokesReceived: 1,
+      net: 4,
+      status: 'complete',
+      provisional: false,
+    })
   })
 
   it('net without a Playing Handicap warns and stays unranked', () => {
@@ -146,6 +194,16 @@ describe('par/bogey net metric', () => {
     })
     expect(result.warnings.map((w) => w.code)).toContain('PAR_BOGEY_NET_HANDICAP_MISSING')
     expect(row(result, 'A').rank).toBeNull()
+    expect(holeResult(result, 'A', 'h1')).toEqual({
+      entryId: 'A',
+      holeId: 'h1',
+      outcome: null,
+      gross: 4,
+      strokesReceived: null,
+      net: null,
+      status: 'complete',
+      provisional: true,
+    })
     expect(result.provisional).toBe(true)
   })
 })
@@ -177,6 +235,14 @@ describe('live vs final pending holes (spec §7.3, §8.12)', () => {
       provisional: true,
       status: 'provisional',
     })
+    expect(holeResult(result, 'A', 'h5')).toMatchObject({
+      outcome: null,
+      gross: null,
+      strokesReceived: 0,
+      net: null,
+      status: 'not_started',
+      provisional: true,
+    })
   })
 
   it('final: each unreturned hole resolves to a loss of -1', () => {
@@ -192,6 +258,11 @@ describe('live vs final pending holes (spec §7.3, §8.12)', () => {
       thru: 4,
       provisional: false,
       status: 'complete',
+    })
+    expect(holeResult(result, 'A', 'h5')).toMatchObject({
+      outcome: -1,
+      status: 'not_started',
+      provisional: false,
     })
   })
 
@@ -212,6 +283,11 @@ describe('live vs final pending holes (spec §7.3, §8.12)', () => {
       status: 'withdrawn',
       result: 1, // played holes remain visible
       thru: 1,
+    })
+    expect(holeResult(result, 'W', 'h2')).toMatchObject({
+      outcome: null,
+      status: 'not_started',
+      provisional: false,
     })
   })
 })

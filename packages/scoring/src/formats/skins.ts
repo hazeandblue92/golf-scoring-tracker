@@ -120,6 +120,7 @@ export function calculateSkins(input: SkinsInput): SkinsResult {
   let carry = 0
   let unawardedUnits = 0
   let cascading = false
+  let suddenDeathPending = false
   /** Winner of the most recent 'won' hole (for award_last_unique_winner). */
   let lastUniqueWinnerId: string | null = null
   /** Tied lows of the most recent 'carried' hole (for split_final_tied). */
@@ -219,6 +220,7 @@ export function calculateSkins(input: SkinsInput): SkinsResult {
   }
 
   if (!cascading && carry > 0) {
+    suddenDeathPending = input.rules.finalCarry === 'sudden_death'
     unawardedUnits += resolveFinalCarry(
       carry,
       input.rules,
@@ -237,7 +239,7 @@ export function calculateSkins(input: SkinsInput): SkinsResult {
     })),
     unawardedUnits,
     warnings,
-    provisional: cascading,
+    provisional: cascading || suddenDeathPending,
   }
 }
 

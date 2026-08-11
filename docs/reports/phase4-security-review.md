@@ -1,6 +1,6 @@
 # Phase 4 Security Review
 
-Reviewed 2026-08-10 against the release profile.
+Reviewed 2026-08-11 against the release profile.
 
 ## Controls implemented
 
@@ -24,8 +24,15 @@ Reviewed 2026-08-10 against the release profile.
   Local development needs no such allowance: the deployment header file is
   host-delivered and the Vite dev server that Playwright drives never applies
   it, so the production policy stays tight without affecting local work.
-- CI scans built JavaScript for service-role variables, database URLs, and JWT-
-  shaped secrets. The 2026-08-10 local build passed across 32 bundles.
+- CI scans browser bundles, tracked repository files, and likely local
+  environment/log/export/report artifacts. It detects Supabase secret keys and
+  privileged JWTs, credentialed database URLs, Cloudflare credentials, VAPID
+  and other private keys, and literal privileged environment values without
+  echoing a match. Documented placeholders, vendor-secret references, and the
+  exact fixed loopback test credential are narrowly distinguished from real
+  secrets. The 2026-08-11 local gate passed across all 32 built bundles and
+  every discovered repository/artifact file. Git history, production logs,
+  and generated exports outside the checkout remain release-time inspections.
 - All 535 installed package records use reviewed allow-listed licenses.
 - Backups are encrypted to an owner-held age recipient; only encrypted data,
   checksum, and a nonsensitive manifest are retained for 30 days.

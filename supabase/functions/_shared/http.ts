@@ -8,7 +8,12 @@
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
 import { createSupabaseContext } from 'npm:@supabase/server@1.4.1'
-import { CORS_HEADERS, json, readEdgeEnv } from './auth-http.ts'
+import {
+  CORS_HEADERS,
+  decodeJwtPayload,
+  json,
+  readEdgeEnv,
+} from './auth-http.ts'
 
 export {
   bearerToken,
@@ -103,6 +108,24 @@ export async function requireUser(
     userId: context.userClaims.id,
     token,
   }
+}
+
+/**
+ * Privileged organizer workflows require a session that has completed its
+ * verified TOTP challenge (FR-AUTH-005, §14.2). Call only after requireUser,
+ * which has already authenticated the token and checked the active profile.
+ */
+export function requireMfa(
+  caller: AuthedCaller,
+  correlationId: string,
+): Response | null {
+  if (decodeJwtPayload(caller.token)['aal'] === 'aal2') return null
+  return rejected(
+    403,
+    'MFA_REQUIRED',
+    correlationId,
+    'Enroll or verify your authenticator in More → Account security, then try again',
+  )
 }
 
 export function corsPreflight(req: Request): Response | null {

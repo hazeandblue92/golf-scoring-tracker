@@ -9,19 +9,30 @@ import {
   newCorrelationId,
   readJsonBody,
   rejected,
+  requireMfa,
   requireUser,
   serviceClient,
 } from '../_shared/http.ts'
 
-async function publishCurrent(service: ReturnType<typeof serviceClient>, eventId: string) {
+async function publishCurrent(
+  service: ReturnType<typeof serviceClient>,
+  eventId: string,
+  finalCompetitionId?: string,
+) {
   const snapshot = await loadScoringSnapshot(service, eventId)
-  const payload = buildProjections(snapshot)
-  const { error } = await service.rpc('publish_projections', {
+  const payload = buildProjections(
+    snapshot,
+    finalCompetitionId === undefined ? undefined : { finalCompetitionId },
+  )
+  const { data, error } = await service.rpc('publish_projections', {
     p_event_id: eventId,
     p_revision: snapshot.event.scoring_revision,
     p_result: payload,
   })
   if (error) throw new Error(error.message)
+  if ((data as { status?: string } | null)?.status !== 'published') {
+    throw new Error('projection changed while it was being published')
+  }
 }
 
 Deno.serve(async (req: Request) => {
@@ -33,6 +44,8 @@ Deno.serve(async (req: Request) => {
   }
   const caller = await requireUser(req, correlationId)
   if (caller instanceof Response) return caller
+  const mfaGate = requireMfa(caller, correlationId)
+  if (mfaGate) return mfaGate
   const parsed = finalizeCompetitionRequestSchema.safeParse(await readJsonBody(req))
   if (!parsed.success) {
     return rejected(400, 'SCORE_INVALID', correlationId,
@@ -55,37 +68,60 @@ Deno.serve(async (req: Request) => {
     return rejected(409, 'PROJECTION_STALE', correlationId, String(error))
   }
 
-  const { data, error } = await service.rpc('finalize_phase1_competition', {
+  const finalize = () => service.rpc('finalize_phase1_competition', {
     p_actor: caller.userId,
     p_competition_id: parsed.data.competitionId,
     p_override_reason: parsed.data.overrideReason,
   })
+  let { data, error } = await finalize()
   if (error) {
     const denied = error.code === '42501'
     return rejected(denied ? 403 : 409, denied ? 'NOT_ASSIGNED' : 'EVENT_LOCKED',
       correlationId, error.message)
   }
-  const result = data as { status?: string; eventId?: string }
+  let result = data as { status?: string; eventId?: string }
+  if (result.status === 'ready' && result.eventId) {
+    try {
+      await publishCurrent(service, result.eventId, parsed.data.competitionId)
+    } catch (publishError) {
+      return rejected(409, 'PROJECTION_STALE', correlationId, String(publishError))
+    }
+    const sealed = await finalize()
+    data = sealed.data
+    error = sealed.error
+    if (error) {
+      const denied = error.code === '42501'
+      return rejected(denied ? 403 : 409, denied ? 'NOT_ASSIGNED' : 'EVENT_LOCKED',
+        correlationId, error.message)
+    }
+    result = data as { status?: string; eventId?: string }
+  }
   if (result.status === 'blocked') {
     const blockers = result as {
       missingScores?: number
       openConflicts?: number
       unattestedCards?: number
+      matchBlockers?: number
+      carryBlockers?: number
       projectionStale?: boolean
     }
     const detail = blockers.projectionStale
       ? 'Finalization is waiting for the current projection. Rebuild results and try again.'
       : `Finalization blocked: ${blockers.missingScores ?? 0} missing scores, ` +
         `${blockers.openConflicts ?? 0} open conflicts, and ` +
-        `${blockers.unattestedCards ?? 0} unattested cards. Resolve them or record an override reason.`
+        `${blockers.unattestedCards ?? 0} unattested cards, ` +
+        `${blockers.matchBlockers ?? 0} unfinished matches, and ` +
+        `${blockers.carryBlockers ?? 0} unresolved carries. ` +
+        'Resolve all unfinished matches and carries; other blockers may be documented with an override reason.'
     return json(409, { ...result, detail, correlationId })
   }
-  if (result.eventId) {
-    try {
-      await publishCurrent(service, result.eventId)
-    } catch (error) {
-      console.error(JSON.stringify({ correlationId, stage: 'final-projection', message: String(error) }))
-    }
+  if (result.status !== 'finalized') {
+    return rejected(
+      409,
+      'PROJECTION_STALE',
+      correlationId,
+      'Final projection could not be sealed; rebuild results and try again',
+    )
   }
   return json(200, { ...result, correlationId })
 })

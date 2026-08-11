@@ -93,6 +93,15 @@ export const aggregateTeamConfigSchema = teamConfigSchema.refine(
   },
 )
 
+/** Match team sides are either one team ball or the best one individual ball. */
+export const matchTeamConfigSchema = teamConfigSchema.refine(
+  (team) => team.bestK === 1,
+  {
+    message: 'match team scoring requires bestK 1',
+    path: ['bestK'],
+  },
+)
+
 /** Scramble records one team ball and freezes one weight per team member. */
 export const scrambleTeamConfigSchema = z
   .strictObject({
@@ -174,6 +183,8 @@ export const stablefordRulesSchema = z.strictObject({
 export const matchRulesSchema = z.strictObject({
   format: z.literal('match'),
   ...commonFields,
+  /** Required at runtime when either pairing side is a team entity. */
+  team: matchTeamConfigSchema.optional(),
 })
 
 export const skinsRulesSchema = z.strictObject({

@@ -37,7 +37,10 @@ export interface SnapshotTeam {
   event_id: string
   name: string
   status: string | null
+  flight_id: string | null
+  course_handicap_unrounded: number | null
   playing_handicap: number | null
+  allowance: number | null
 }
 
 export interface SnapshotCompetition {
@@ -102,8 +105,23 @@ export interface SnapshotFlight {
   sort_order: number
 }
 
+/** Frozen starting group used for shotgun match order and group skins pools. */
+export interface SnapshotGroup {
+  id: string
+  round_id: string
+  start_hole_ordinal: number | null
+}
+
+export interface SnapshotGroupMember {
+  group_id: string
+  event_entry_id: string | null
+  event_team_id: string | null
+}
+
 export interface ScoringSnapshot {
   event: { id: string; status: string; scoring_revision: number }
+  /** Every event round in authoritative event order, including unlinked rounds. */
+  rounds: Array<{ id: string; round_number: number }>
   holes: SnapshotHole[]
   entries: SnapshotEntry[]
   teams: SnapshotTeam[]
@@ -112,12 +130,16 @@ export interface ScoringSnapshot {
   competitionRounds: Array<{
     competition_id: string
     round_id: string
+    /** Event round order, frozen here so projection order is deterministic. */
+    round_number: number
     hole_scope: number[] | null
     /** Per-round weight applied by §8.14 aggregation; defaults to 1. */
     weight: number | null
   }>
   competitionEntities: SnapshotCompetitionEntity[]
   flights: SnapshotFlight[]
+  groups: SnapshotGroup[]
+  groupMembers: SnapshotGroupMember[]
   matches: SnapshotMatch[]
   individualScores: SnapshotIndividualScore[]
   teamScores: SnapshotTeamScore[]
@@ -134,6 +156,10 @@ async function selectAll<T>(
   return (data ?? []) as T[]
 }
 
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
 export async function loadScoringSnapshot(
   service: SupabaseClient,
   eventId: string,
@@ -147,8 +173,9 @@ export async function loadScoringSnapshot(
     throw new Error(`snapshot read failed for events: ${eventError?.message ?? 'not found'}`)
   }
 
-  const rounds = await selectAll<{ id: string }>(
-    service, 'rounds', 'id', (q) => q.eq('event_id', eventId),
+  const rounds = await selectAll<{ id: string; round_number: number }>(
+    service, 'rounds', 'id, round_number', (q) =>
+      q.eq('event_id', eventId).order('round_number').order('id'),
   )
   const roundIds = rounds.map((r) => r.id)
 
@@ -157,6 +184,7 @@ export async function loadScoringSnapshot(
     entries,
     teams,
     flights,
+    groups,
     competitions,
     competitionRounds,
     individualScores,
@@ -175,13 +203,21 @@ export async function loadScoringSnapshot(
       (q) => q.eq('event_id', eventId),
     ),
     selectAll<SnapshotTeam>(
-      service, 'event_teams', 'id, event_id, name, status, playing_handicap',
+      service, 'event_teams',
+      'id, event_id, name, status, flight_id, course_handicap_unrounded, ' +
+        'playing_handicap, allowance',
       (q) => q.eq('event_id', eventId),
     ),
     selectAll<SnapshotFlight>(
       service, 'flights', 'id, event_id, name, sort_order',
       (q) => q.eq('event_id', eventId).order('sort_order'),
     ),
+    roundIds.length
+      ? selectAll<SnapshotGroup>(
+          service, 'groups', 'id, round_id, start_hole_ordinal',
+          (q) => q.in('round_id', roundIds).order('round_id').order('sort_order').order('id'),
+        )
+      : Promise.resolve([]),
     selectAll<SnapshotCompetition>(
       service, 'competitions',
       'id, event_id, name, format, metric, status, rules_schema_version, rules_json, engine_version',
@@ -208,10 +244,23 @@ export async function loadScoringSnapshot(
     ),
   ])
 
+  const roundNumberById = new Map(rounds.map((round) => [round.id, round.round_number]))
+  const orderedCompetitionRounds = competitionRounds
+    .map((competitionRound) => ({
+      ...competitionRound,
+      round_number: roundNumberById.get(competitionRound.round_id) ?? Number.MAX_SAFE_INTEGER,
+    }))
+    .sort((a, b) =>
+      compareText(a.competition_id, b.competition_id) ||
+      a.round_number - b.round_number ||
+      compareText(a.round_id, b.round_id),
+    )
+
   const competitionIds = competitions.map((c) => c.id)
   const teamIds = teams.map((t) => t.id)
+  const groupIds = groups.map((group) => group.id)
 
-  const [competitionEntities, teamMembers, matches] = await Promise.all([
+  const [competitionEntities, teamMembers, groupMembers, matches] = await Promise.all([
     competitionIds.length
       ? selectAll<SnapshotCompetitionEntity>(
           service, 'competition_entities',
@@ -225,12 +274,22 @@ export async function loadScoringSnapshot(
           (q) => q.in('event_team_id', teamIds),
         )
       : Promise.resolve([]),
+    groupIds.length
+      ? selectAll<SnapshotGroupMember>(
+          service, 'group_members', 'group_id, event_entry_id, event_team_id',
+          (q) => q.in('group_id', groupIds).order('group_id').order('id'),
+        )
+      : Promise.resolve([]),
     competitionIds.length
       ? selectAll<SnapshotMatch>(
           service, 'matches',
           'id, competition_id, round_id, side_a_entity_id, side_b_entity_id, ' +
             'bracket_position, status, winner_entity_id, concession_by',
-          (q) => q.in('competition_id', competitionIds).order('bracket_position'),
+          (q) =>
+            q.in('competition_id', competitionIds)
+              .order('round_id')
+              .order('bracket_position')
+              .order('id'),
         )
       : Promise.resolve([]),
   ])
@@ -241,14 +300,17 @@ export async function loadScoringSnapshot(
       status: eventRow.status as string,
       scoring_revision: Number(eventRow.scoring_revision),
     },
+    rounds,
     holes,
     entries,
     teams,
     teamMembers,
     flights,
+    groups,
+    groupMembers,
     matches,
     competitions,
-    competitionRounds,
+    competitionRounds: orderedCompetitionRounds,
     competitionEntities,
     individualScores,
     teamScores,

@@ -13,7 +13,7 @@
  * real sessions via a password grant, matching how `username-login` mints one.
  */
 
-import { randomUUID } from 'node:crypto'
+import { createHmac, randomUUID } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { PUBLISHABLE_KEY, SUPABASE_URL, serviceClient } from './stack.ts'
 import { createClient } from '@supabase/supabase-js'
@@ -32,7 +32,11 @@ export interface TestAccount {
   username: string
   password: string
   accessToken: string
+  /** Pre-challenge token retained only for negative MFA enforcement tests. */
+  aal1AccessToken?: string
   displayName: string
+  /** Present only for test accounts deliberately enrolled in TOTP MFA. */
+  totpSecret?: string
 }
 
 export interface FixtureHole {
@@ -70,6 +74,35 @@ export interface ScoringFixture {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+function decodeBase32(value: string): Buffer {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+  const bytes: number[] = []
+  let buffer = 0
+  let bits = 0
+  for (const character of value.toUpperCase().replaceAll('=', '').replaceAll(' ', '')) {
+    const digit = alphabet.indexOf(character)
+    if (digit < 0) throw new Error('fixture: invalid TOTP secret')
+    buffer = (buffer << 5) | digit
+    bits += 5
+    if (bits >= 8) {
+      bits -= 8
+      bytes.push((buffer >>> bits) & 0xff)
+      buffer &= bits === 0 ? 0 : (1 << bits) - 1
+    }
+  }
+  return Buffer.from(bytes)
+}
+
+/** Generate the six-digit RFC 6238 SHA-1 code used by the local MFA tests. */
+export function totpCode(secret: string, now = Date.now()): string {
+  const counter = Buffer.alloc(8)
+  counter.writeBigUInt64BE(BigInt(Math.floor(now / 30_000)))
+  const digest = createHmac('sha1', decodeBase32(secret)).update(counter).digest()
+  const offset = digest[digest.length - 1]! & 0x0f
+  const binary = digest.readUInt32BE(offset) & 0x7fff_ffff
+  return String(binary % 1_000_000).padStart(6, '0')
+}
+
 function must<T>(
   result: { data: T | null; error: { message: string } | null },
   what: string,
@@ -88,7 +121,12 @@ function must<T>(
  */
 export async function createAccount(
   service: SupabaseClient,
-  opts: { username?: string; mustChangePassword?: boolean; displayName?: string } = {},
+  opts: {
+    username?: string
+    mustChangePassword?: boolean
+    displayName?: string
+    withMfa?: boolean
+  } = {},
 ): Promise<TestAccount> {
   const suffix = randomUUID().slice(0, 8)
   const username = (opts.username ?? `t${suffix}`).toLowerCase()
@@ -142,12 +180,35 @@ export async function createAccount(
     throw new Error(`fixture: sign-in failed for ${username} — ${signInError}`)
   }
 
+  let totpSecret: string | undefined
+  const aal1AccessToken = opts.withMfa === true ? accessToken : undefined
+  if (opts.withMfa === true) {
+    const enrolled = await auth.auth.mfa.enroll({
+      factorType: 'totp',
+      friendlyName: 'Integration authenticator',
+    })
+    if (enrolled.error || !enrolled.data) {
+      throw new Error(`fixture: MFA enrollment failed — ${enrolled.error?.message}`)
+    }
+    totpSecret = enrolled.data.totp.secret
+    const verified = await auth.auth.mfa.challengeAndVerify({
+      factorId: enrolled.data.id,
+      code: totpCode(totpSecret),
+    })
+    if (verified.error || !verified.data) {
+      throw new Error(`fixture: MFA verification failed — ${verified.error?.message}`)
+    }
+    accessToken = verified.data.access_token
+  }
+
   return {
     profileId,
     username,
     password,
     displayName,
     accessToken,
+    ...(aal1AccessToken === undefined ? {} : { aal1AccessToken }),
+    ...(totpSecret === undefined ? {} : { totpSecret }),
   }
 }
 
@@ -219,7 +280,7 @@ export async function buildScoringFixture(
   // and turn a healthy fixture into an upstream timeout. Account order is not
   // meaningful, so build them serially and keep the integration signal about
   // application behavior rather than local bcrypt contention.
-  const director = await createAccount(service, { displayName: 'Director' })
+  const director = await createAccount(service, { displayName: 'Director', withMfa: true })
   const scorer = await createAccount(service, { displayName: 'Scorer' })
   const player = await createAccount(service, { displayName: 'Player One' })
   const outsider = await createAccount(service, { displayName: 'Outsider' })

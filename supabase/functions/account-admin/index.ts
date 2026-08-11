@@ -115,6 +115,14 @@ Deno.serve(async (req) => {
   if (userError || !caller) {
     return errorJson(401, 'AUTH_REQUIRED', 'Sign in to continue')
   }
+  const { data: callerProfile, error: callerProfileError } = await service
+    .from('profiles')
+    .select('status')
+    .eq('id', caller.id)
+    .maybeSingle()
+  if (callerProfileError || callerProfile?.status !== 'active') {
+    return errorJson(401, 'AUTH_REQUIRED', 'Sign in to continue')
+  }
 
   // Authorize: an active (revoked_at null) owner or league_admin role,
   // checked server-side against role_assignments (§2.2: never inferred from
@@ -134,33 +142,14 @@ Deno.serve(async (req) => {
   }
   const leagueId = roles[0].league_id as string
 
-  // MFA gate (FR-AUTH-005): owner/league-admin accounts MUST enroll TOTP MFA
-  // before privileged actions. If the caller's JWT is not at 'aal2' but the
-  // account HAS verified TOTP factors, the session skipped its MFA challenge
-  // and is rejected. When no factors exist yet we allow with a logged
-  // warning: the TOTP enrollment UI ships with the web app, and production
-  // hardening (Phase 4) makes verified factors mandatory before any
-  // privileged call succeeds.
+  // MFA gate (FR-AUTH-005): enrollment alone is insufficient. The current
+  // session must have completed its verified TOTP challenge and carry aal2.
   const aal = decodeJwtPayload(token)['aal']
   if (aal !== 'aal2') {
-    const { data: factorData, error: factorError } = await service.auth.admin
-      .mfa.listFactors({ userId: caller.id })
-    if (factorError) {
-      console.error('account-admin: factor lookup failed')
-      return errorJson(503, 'SERVICE_UNAVAILABLE', 'Please try again shortly')
-    }
-    const hasVerifiedTotp = (factorData?.factors ?? []).some(
-      (factor) => factor.factor_type === 'totp' && factor.status === 'verified',
-    )
-    if (hasVerifiedTotp) {
-      return errorJson(
-        403,
-        'MFA_REQUIRED',
-        'Complete your TOTP challenge before administrative actions',
-      )
-    }
-    console.warn(
-      'account-admin: privileged call without MFA enrollment (allowed until Phase 4 hardening)',
+    return errorJson(
+      403,
+      'MFA_REQUIRED',
+      'Enroll or verify your authenticator before administrative actions',
     )
   }
 

@@ -25,6 +25,7 @@ import {
   ENGINE_VERSION,
   RULES_SCHEMA_VERSION,
   canonicalJson,
+  canonicalNumericResult,
   resultHash,
   type CanonicalValue,
 } from '@gtt/scoring'
@@ -292,10 +293,15 @@ function recomputeProjectionHash(
         rank: r.rank,
         isTied: r.isTied,
         thru: r.thru,
-        // The orchestrator hashes engine integers; the export carries the
-        // numeric column as a string, so convert back for this comparison.
-        resultPrimary: r.resultPrimary === null ? null : Number(r.resultPrimary),
-        resultSecondary: r.resultSecondary === null ? null : Number(r.resultSecondary),
+        // Match the orchestrator's canonical numeric contract: established
+        // integer results stay numbers, while weighted decimal totals are
+        // canonical strings rather than floating-point JSON values.
+        resultPrimary: canonicalNumericResult(
+          r.resultPrimary === null ? null : Number(r.resultPrimary),
+        ),
+        resultSecondary: canonicalNumericResult(
+          r.resultSecondary === null ? null : Number(r.resultSecondary),
+        ),
         status: r.status,
       }))
       .sort((a, b) => byKeys([String(a.entityId)], [String(b.entityId)])),
@@ -523,6 +529,7 @@ describe('export snapshot hashing (spec §20.2 · AC-010 · deferred-export-snap
     expect(rowsOf(fx.competitions.skinsId)).toHaveLength(PLAYER_COUNT)
     expect(holesOf(fx.competitions.skinsId)).toHaveLength(18)
     expect(rowsOf(fx.competitions.skinsId).every((r) => r.rank === null)).toBe(true)
+    expect(rowsOf(fx.competitions.skinsId).every((r) => r.status === 'provisional')).toBe(true)
   })
 
   it('AC-010 · spec §20.2 — re-hashing a freshly re-read export reproduces the identical digest', async () => {

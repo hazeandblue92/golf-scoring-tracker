@@ -23,7 +23,7 @@
     "lint": "eslint . --max-warnings=0",
     "test:integration": "vitest run --root tests/integration",
     "test:e2e": "playwright test",
-    "test:security": "node scripts/check-security-headers.mjs",
+    "test:security": "node --test scripts/test/security-secret-scan.test.mjs && node scripts/check-security-headers.mjs",
     "test:bundle-budget": "node scripts/check-bundle-budget.mjs",
     "test:licenses": "node scripts/check-licenses.mjs",
     "load:prepare-local": "node --experimental-strip-types scripts/prepare-capacity-fixture.mjs",

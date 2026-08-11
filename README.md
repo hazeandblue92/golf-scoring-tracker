@@ -21,7 +21,7 @@ npm run build          # production web-app build
 npm run test:integration     # database, Edge Function, and RLS checks
 npm run test:e2e             # Chromium, Firefox, WebKit, and Pixel 7 matrix
 npm run test:bundle-budget   # enforce the 250 KiB initial JS limit
-npm run test:security        # verify CSP/headers and scan built bundles
+npm run test:security        # verify CSP/headers and scan bundles/source/artifacts
 npm run test:licenses        # enforce the reviewed dependency license list
 ```
 
@@ -36,7 +36,7 @@ supabase/migrations/      Ordered SQL migrations
 supabase/functions/       Edge Functions and shared server code
 supabase/seed.sql         Deterministic development fixtures
 tests/e2e/                Playwright suites
-tests/security/           RLS/RPC tests
+tests/integration/        Database, Edge Function, RLS/RPC tests
 docs/                     ADRs, runbooks, data dictionary
 .github/workflows/        CI, deploy, backup, dependency review
 apps/web/public/          Host headers, redirects, and static web assets

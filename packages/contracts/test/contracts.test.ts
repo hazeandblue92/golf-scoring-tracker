@@ -126,16 +126,25 @@ describe('rulesJsonSchema', () => {
     expect(rulesJsonSchema.safeParse(aggregate).success).toBe(true)
   })
 
-  it('accepts par_bogey with a points map and match with common fields only', () => {
+  it('accepts par_bogey and freezes a match team score source when teams participate', () => {
     const parBogey = {
       format: 'par_bogey',
       ...common,
       metric: 'points',
       points: { '-1': 1, '0': 0, '1+': -1 },
     }
-    const match = { format: 'match', ...common }
+    const individualMatch = { format: 'match', ...common }
+    const teamMatch = {
+      ...individualMatch,
+      team: { teamSize: 2, bestK: 1, scoreSource: 'individual' },
+    }
     expect(rulesJsonSchema.safeParse(parBogey).success).toBe(true)
-    expect(rulesJsonSchema.safeParse(match).success).toBe(true)
+    expect(rulesJsonSchema.safeParse(individualMatch).success).toBe(true)
+    expect(rulesJsonSchema.safeParse(teamMatch).success).toBe(true)
+    expect(rulesJsonSchema.safeParse({
+      ...teamMatch,
+      team: { ...teamMatch.team, bestK: 2 },
+    }).success).toBe(false)
   })
 
   it('accepts committee_custom rounding as a structured object', () => {

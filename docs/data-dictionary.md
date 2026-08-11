@@ -60,7 +60,7 @@ using the service role.
 
 | Table | Purpose | Key columns | RLS posture |
 | --- | --- | --- | --- |
-| `competitions` | Structured Terms of Competition; `rules_json` authoritative, `rules_text` generated | `event_id` + `name` (unique), `format`, `metric`, `status`, `rules_schema_version`, `rules_json`, `engine_version`, `visibility`, `finalized_at/by`, `final_result_hash` | Read: layered event+competition visibility incl. anon for public. Write: directors; finalize/reopen via MFA-gated `finalize-competition` EF; transition trigger enforces the lifecycle |
+| `competitions` | Structured Terms of Competition; `rules_json` authoritative, `rules_text` generated | `event_id` + `name` (unique), `format`, `metric`, `status`, `rules_schema_version`, `rules_json`, `engine_version`, `visibility`, `finalized_at/by`, `final_result_hash` | Read: layered event+competition visibility incl. anon for public. Write: directors; sealed independently per competition by the MFA-gated `finalize-competition` EF and unsealed by the MFA-gated `reopen-competition` EF; transition trigger enforces the lifecycle |
 | `competition_rounds` | Round scope with hole subset, weight, drop policy; PK (competition, round) | `competition_id`, `round_id`, `hole_scope int[]`, `weight`, `drop_policy` | Read with competition. Write: directors |
 | `competition_entities` | Entrants; XOR CHECK exactly one of entry/team | `competition_id`, `event_entry_id` XOR `event_team_id`, `eligibility_status`, `flight_id`, `seed` | Read with competition. Write: directors |
 | `matches` | Match-play pairings and results | `competition_id`, `round_id`, `side_a/b_entity_id`, `bracket_position`, `status`, `winner_entity_id`, `result_summary` | Read with competition. Write: directors |

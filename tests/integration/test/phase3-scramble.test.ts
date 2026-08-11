@@ -36,7 +36,7 @@ describe('Phase 3 three- and four-player scramble workflow', () => {
 
   beforeAll(async () => {
     expect(await stackIsUp(), 'local Supabase stack must be running').toBe(true)
-    owner = await createAccount(service, { displayName: 'Phase 3 Scramble Owner' })
+    owner = await createAccount(service, { displayName: 'Phase 3 Scramble Owner', withMfa: true })
     const membership = await service.from('league_memberships').insert({
       league_id: LEAGUE_ID,
       profile_id: owner.profileId,

@@ -18,11 +18,12 @@
  *     the match (spec §8.6).
  *
  * Missing data propagates, never coerces (spec §7.3): a hole with either
- * side's score null and no concession is undetermined — cumulative
- * evaluation stops there and every later hole keeps winner null, freezing
- * the match state. Holes after an early clinch likewise carry winner null:
- * they are not part of the match, although simultaneous stroke/skins
- * competitions may still require them (spec §21.1).
+ * side's score null and no concession is undetermined. Other determined holes
+ * still count, because shotgun/back-nine starts may record later course
+ * ordinals before earlier ones; a missing ordinal is not proof that play
+ * stopped. Holes after an early clinch carry winner null: they are not part of
+ * the match, although simultaneous stroke/skins competitions may still require
+ * them (spec §21.1).
  *
  * Handicap match play (spec §8.6, §9.4-9.5): strokes are normalized from the
  * LOWEST unrounded Course Handicap — correct for negative internal plus
@@ -66,7 +67,7 @@ export interface MatchInput {
 
 export interface MatchHoleOutcome {
   holeId: string
-  /** null = undetermined, or not part of the match (after clinch/stop). */
+  /** null = undetermined, or not part of the match after a clinch. */
   winner: 'a' | 'b' | 'half' | null
 }
 
@@ -88,9 +89,12 @@ const SIDE_LABEL = { a: 'A', b: 'B' } as const
 
 function validateSideScore(holeId: string, side: 'a' | 'b', value: number | null): void {
   if (value === null) return
-  if (!Number.isInteger(value) || value < 1) {
+  // This is the configured comparison score, not necessarily raw gross. A
+  // legitimate net value can be zero or negative when a side receives several
+  // relative match strokes on a low gross score.
+  if (!Number.isSafeInteger(value)) {
     throw new RangeError(
-      `hole '${holeId}' side ${SIDE_LABEL[side]}: score must be a positive integer or null, got ${value}`,
+      `hole '${holeId}' side ${SIDE_LABEL[side]}: comparison must be an integer or null, got ${value}`,
     )
   }
 }
@@ -133,18 +137,16 @@ export function calculateMatch(input: MatchInput): MatchState {
   let winsA = 0
   let winsB = 0
   let determined = 0
-  let stopped = false // an undetermined hole froze cumulative evaluation
   let clinched = false
 
   for (const hole of holes) {
-    if (stopped || clinched) {
+    if (clinched) {
       outcomes.push({ holeId: hole.id, winner: null })
       continue
     }
     const winner = holeWinner(inputByHole.get(hole.id))
     outcomes.push({ holeId: hole.id, winner })
     if (winner === null) {
-      stopped = true
       continue
     }
     determined += 1
@@ -184,7 +186,7 @@ export function calculateMatch(input: MatchInput): MatchState {
     }
   }
 
-  if (!stopped && determined === holes.length) {
+  if (determined === holes.length) {
     // Regulation complete without a clinch: difference is necessarily zero
     // (any nonzero difference at the last hole satisfies abs(up) > 0).
     if (extraHolesAllowed) {

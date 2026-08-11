@@ -268,6 +268,7 @@ small { color: var(--muted); }
 .progress-panel p { margin: 0; color: #c8ddd5; font-size: 0.82rem; }
 .control-grid, .operations-grid { margin-top: 2rem; display: grid; gap: 2rem; }
 .control-grid > section, .operations-grid > section { min-width: 0; }
+.control-screen .section-heading > div p { margin: 0.2rem 0 0; color: var(--muted); font-size: 0.82rem; }
 .fact-list { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 0; }
 .fact-list dt, .fact-list dd { min-height: 42px; margin: 0; display: flex; align-items: center; border-bottom: 1px solid var(--line); }
 .fact-list dt { color: var(--muted); }
@@ -330,6 +331,11 @@ small { color: var(--muted); }
 .conflict-list article span { color: var(--muted); font-size: 0.78rem; }
 .conflict-list article p { margin: 0.65rem 0; }
 .control-footer { margin-top: 2.5rem; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.75rem; }
+.mfa-enrollment { margin: 1rem 0; display: grid; gap: 1rem; align-items: center; }
+.mfa-enrollment img { padding: 0.5rem; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; }
+.mfa-enrollment p { margin: 0 0 0.5rem; color: var(--muted); }
+.mfa-enrollment code { overflow-wrap: anywhere; }
+.mfa-challenge { margin-top: 1rem; display: grid; gap: 0.75rem; align-items: end; }
 
 .skins-totals { padding: 1.25rem; color: #fff; background: var(--green-dark); border-radius: 14px; }
 .skins-totals .section-heading { border-color: #497669; }
@@ -426,6 +432,8 @@ small { color: var(--muted); }
   .score-controls { margin-top: 0; }
   .compact-select { grid-column: 2; }
   .control-grid, .operations-grid { grid-template-columns: 1fr 1fr; }
+  .mfa-enrollment { grid-template-columns: 192px minmax(0, 1fr); }
+  .mfa-challenge { grid-template-columns: minmax(0, 1fr) max-content; }
   .catalog-layout { grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr); }
   .catalog-layout--courses { grid-template-columns: minmax(0, 0.9fr) minmax(380px, 1.1fr); }
 }

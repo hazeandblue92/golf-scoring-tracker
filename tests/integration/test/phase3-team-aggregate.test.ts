@@ -17,7 +17,7 @@ describe('Phase 3 hole-level team aggregate', () => {
 
   beforeAll(async () => {
     expect(await stackIsUp(), 'local Supabase stack must be running').toBe(true)
-    owner = await createAccount(service, { displayName: 'Phase 3 Aggregate Owner' })
+    owner = await createAccount(service, { displayName: 'Phase 3 Aggregate Owner', withMfa: true })
     const membership = await service.from('league_memberships').insert({
       league_id: LEAGUE_ID,
       profile_id: owner.profileId,

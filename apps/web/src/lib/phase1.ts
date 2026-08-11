@@ -2,6 +2,7 @@ import type {
   AttestScorecardRequest,
   FinalizeCompetitionRequest,
   PublishEventRequest,
+  ReopenCompetitionRequest,
   ResolveScoreConflictRequest,
   SaveEventDraftRequest,
 } from '@gtt/contracts';
@@ -56,8 +57,49 @@ export const finalizeCompetition = (body: FinalizeCompetitionRequest) =>
     unattestedCards?: number;
   }>('finalize-competition', body);
 
+export const reopenCompetition = (body: ReopenCompetitionRequest) =>
+  invokePhase1<{
+    status: 'reopened';
+    eventId: string;
+    competitionId: string;
+  }>('reopen-competition', body);
+
 export const resolveScoreConflict = (body: ResolveScoreConflictRequest) =>
   invokePhase1<{ status: string }>('resolve-score-conflict', body);
+
+export interface SubstituteEventEntryRequest {
+  eventId: string;
+  outgoingEntryId: string;
+  incomingParticipantId: string;
+  effectiveRoundId: string;
+  reason: string;
+}
+
+export async function substituteEventEntry(body: SubstituteEventEntryRequest) {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.rpc('substitute_event_entry', {
+    p_event_id: body.eventId,
+    p_outgoing_entry_id: body.outgoingEntryId,
+    p_incoming_participant_id: body.incomingParticipantId,
+    p_effective_round_id: body.effectiveRoundId,
+    p_reason: body.reason,
+  });
+  if (error) throw new Error(error.message);
+  const result = data as {
+    status?: 'saved' | 'rejected';
+    eventEntryId?: string;
+    effectiveRoundId?: string;
+    detail?: string;
+    error_code?: string;
+  } | null;
+  if (result?.status !== 'saved' || result.eventEntryId === undefined) {
+    throw new Error(result?.detail ?? 'The substitution could not be saved.');
+  }
+  return {
+    eventEntryId: result.eventEntryId,
+    effectiveRoundId: result.effectiveRoundId ?? body.effectiveRoundId,
+  };
+}
 
 export const attestScorecard = (body: AttestScorecardRequest) =>
   invokePhase1<{ status: 'attested' | 'duplicate'; scoreRevision: number }>(

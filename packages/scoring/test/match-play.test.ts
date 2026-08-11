@@ -161,9 +161,10 @@ describe('match play state (spec §8.6, golden §20.2)', () => {
     expect(bUp.dormie).toBe(false)
   })
 
-  it('freezes the match state at the first undetermined hole', () => {
-    // A up 1 through 3; hole 4 has a missing B score; later holes carry
-    // scores that would flip the match if (incorrectly) counted.
+  it('counts determined later ordinals when an earlier shotgun hole is unresolved', () => {
+    // A up 1 through 3; hole 4 has a missing B score, but the later played
+    // holes still count. This is reachable when the group starts on a later
+    // course ordinal and the snapshot remains in course order.
     const inputs = [
       played(1, 'a'),
       played(2, 'half'),
@@ -172,12 +173,14 @@ describe('match play state (spec §8.6, golden §20.2)', () => {
       ...Array.from({ length: 14 }, (_, i) => played(i + 5, 'b')),
     ]
     const state = calculateMatch(match(inputs))
-    expect(state.status).toBe('in_progress')
-    expect(state.holesUp).toBe(1)
-    expect(state.holesRemaining).toBe(15)
-    expect(state.display).toBe('A 1 UP')
+    expect(state.status).toBe('won')
+    expect(state.winner).toBe('b')
+    expect(state.holesUp).toBe(-8)
+    expect(state.holesRemaining).toBe(6)
+    expect(state.display).toBe('B wins 8 & 6')
     expect(state.outcomes[3]?.winner).toBeNull()
-    expect(state.outcomes.slice(3).every((o) => o.winner === null)).toBe(true)
+    expect(state.outcomes[4]?.winner).toBe('b')
+    expect(state.outcomes.slice(13).every((o) => o.winner === null)).toBe(true)
   })
 
   it('treats a hole with no input row as undetermined too', () => {
@@ -189,9 +192,10 @@ describe('match play state (spec §8.6, golden §20.2)', () => {
       ...Array.from({ length: 14 }, (_, i) => played(i + 5, 'b')),
     ]
     const state = calculateMatch(match(inputs))
-    expect(state.holesUp).toBe(1)
-    expect(state.holesRemaining).toBe(15)
+    expect(state.holesUp).toBe(-8)
+    expect(state.holesRemaining).toBe(6)
     expect(state.outcomes[3]?.winner).toBeNull()
+    expect(state.outcomes[4]?.winner).toBe('b')
   })
 
   it('aligns holeInputs by holeId regardless of array order', () => {
@@ -203,6 +207,17 @@ describe('match play state (spec §8.6, golden §20.2)', () => {
     expect(calculateMatch(match(shuffled))).toEqual(calculateMatch(match(ordered)))
   })
 
+  it('accepts zero and negative net comparison values', () => {
+    const state = calculateMatch(match([
+      { holeId: 'h1', a: -1, b: 0 },
+      { holeId: 'h2', a: 0, b: -2 },
+    ]))
+
+    expect(state.outcomes[0]?.winner).toBe('a')
+    expect(state.outcomes[1]?.winner).toBe('b')
+    expect(state.holesUp).toBe(0)
+  })
+
   it('rejects invalid inputs', () => {
     expect(() =>
       calculateMatch({ holes: [], holeInputs: [], extraHolesAllowed: false }),
@@ -210,9 +225,6 @@ describe('match play state (spec §8.6, golden §20.2)', () => {
     expect(() =>
       calculateMatch(match([played(1, 'a'), played(1, 'b')])),
     ).toThrow(/multiple match inputs/)
-    expect(() =>
-      calculateMatch(match([{ holeId: 'h1', a: 0, b: 4 }])),
-    ).toThrow(RangeError)
     expect(() =>
       calculateMatch(match([{ holeId: 'h1', a: 4, b: 4.5 }])),
     ).toThrow(RangeError)
@@ -241,11 +253,6 @@ describe('match play state (spec §8.6, golden §20.2)', () => {
           const state = calculateMatch({ holes, holeInputs, extraHolesAllowed })
 
           expect(state.outcomes).toHaveLength(holes.length)
-          const firstNull = state.outcomes.findIndex((o) => o.winner === null)
-          if (firstNull !== -1) {
-            // Once evaluation stops (undetermined or clinch), the tail is null.
-            expect(state.outcomes.slice(firstNull).every((o) => o.winner === null)).toBe(true)
-          }
           const det = state.outcomes.filter((o) => o.winner !== null)
           const winsA = det.filter((o) => o.winner === 'a').length
           const winsB = det.filter((o) => o.winner === 'b').length

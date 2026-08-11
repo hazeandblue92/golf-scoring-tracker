@@ -23,7 +23,7 @@ describe('Phase 2 two-person field trial', () => {
 
   beforeAll(async () => {
     expect(await stackIsUp(), 'local Supabase stack must be running').toBe(true)
-    owner = await createAccount(service, { displayName: 'Phase 2 Owner' })
+    owner = await createAccount(service, { displayName: 'Phase 2 Owner', withMfa: true })
     const membership = await service.from('league_memberships').insert({
       league_id: LEAGUE_ID,
       profile_id: owner.profileId,

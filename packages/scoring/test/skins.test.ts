@@ -320,7 +320,7 @@ describe('finalCarry sudden_death (spec §8.7)', () => {
     )
     expect(result.unawardedUnits).toBe(2)
     expect(warningCodes(result)).toEqual(['SKINS_SUDDEN_DEATH_PENDING'])
-    expect(result.provisional).toBe(false)
+    expect(result.provisional).toBe(true)
   })
 })
 

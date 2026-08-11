@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   attestScorecardRequestSchema,
   publishEventRequestSchema,
+  reopenCompetitionRequestSchema,
   resolveScoreConflictRequestSchema,
   saveEventDraftRequestSchema,
 } from '../src/index.ts'
@@ -111,6 +112,17 @@ describe('Phase 1 organizer contracts', () => {
   it('defaults publish to a published-but-closed event', () => {
     const parsed = publishEventRequestSchema.parse({ eventId: id('8') })
     expect(parsed.openScoring).toBe(false)
+  })
+
+  it('requires a meaningful reason to reopen a finalized competition', () => {
+    expect(reopenCompetitionRequestSchema.safeParse({
+      competitionId: id('8'),
+      reason: 'Correcting an attested score after committee review',
+    }).success).toBe(true)
+    expect(reopenCompetitionRequestSchema.safeParse({
+      competitionId: id('8'),
+      reason: '  ',
+    }).success).toBe(false)
   })
 
   it('requires a valid numeric shape for manual conflict resolution', () => {

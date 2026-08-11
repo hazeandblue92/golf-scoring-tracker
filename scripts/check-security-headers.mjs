@@ -1,5 +1,10 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+
+import {
+  scanBrowserBundles,
+  scanRepositorySecrets,
+} from './lib/secret-scan.mjs';
 
 const requiredHeaders = [
   'Content-Security-Policy:',
@@ -18,12 +23,6 @@ const requiredDirectives = [
   "frame-ancestors 'none'",
 ];
 const forbiddenCsp = ["script-src 'self' 'unsafe-inline'", "script-src 'self' 'unsafe-eval'"];
-const forbiddenBundlePatterns = [
-  ['service role variable', /SUPABASE_SERVICE_ROLE_KEY/g],
-  ['database connection string', /postgres(?:ql)?:\/\//g],
-  ['Supabase legacy service token', /eyJ[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]{20,}/g],
-];
-
 const headersPath = path.resolve('apps/web/public/_headers');
 const distHeadersPath = path.resolve('apps/web/dist/_headers');
 const [headers, distHeaders] = await Promise.all([
@@ -69,17 +68,22 @@ for (const [label, pattern] of [
 }
 
 const distAssets = path.resolve('apps/web/dist/assets');
-const assetNames = await readdir(distAssets).catch(() => []);
-for (const assetName of assetNames.filter((name) => name.endsWith('.js'))) {
-  const contents = await readFile(path.join(distAssets, assetName), 'utf8');
-  for (const [label, pattern] of forbiddenBundlePatterns) {
-    if (pattern.test(contents)) failures.push(`${label} found in ${assetName}`);
-    pattern.lastIndex = 0;
-  }
+const [bundleScan, repositoryScan] = await Promise.all([
+  scanBrowserBundles(distAssets),
+  scanRepositorySecrets(),
+]);
+if (bundleScan.bundlesScanned === 0) {
+  failures.push('no built JavaScript bundles found; run `npm run build` first');
+}
+for (const finding of [...bundleScan.findings, ...repositoryScan.findings]) {
+  failures.push(`${finding.label} found in ${finding.filePath}:${finding.lineNumber}`);
 }
 
 if (failures.length > 0) {
   throw new Error(`Security release gate failed:\n- ${failures.join('\n- ')}`);
 }
 
-console.log(`Security release gate passed (${assetNames.filter((name) => name.endsWith('.js')).length} bundles scanned).`);
+console.log(
+  `Security release gate passed (${bundleScan.bundlesScanned} bundles and ` +
+  `${repositoryScan.filesScanned} repository/artifact files scanned).`,
+);

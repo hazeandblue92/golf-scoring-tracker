@@ -19,7 +19,7 @@ describe('Phase 4 operations hardening', () => {
 
   beforeAll(async () => {
     expect(await stackIsUp(), 'local Supabase stack must be running').toBe(true)
-    owner = await createAccount(service, { displayName: 'Phase 4 Operator' })
+    owner = await createAccount(service, { displayName: 'Phase 4 Operator', withMfa: true })
     outsider = await createAccount(service, { displayName: 'Phase 4 Outsider' })
     const membership = await service.from('league_memberships').insert([
       { league_id: LEAGUE_ID, profile_id: owner.profileId, member_status: 'active' },

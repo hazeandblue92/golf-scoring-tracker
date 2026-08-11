@@ -40,7 +40,11 @@ describe('flights and divisions (§5.2, §8.7)', () => {
 
   beforeAll(async () => {
     expect(await stackIsUp(), 'local Supabase stack must be running').toBe(true)
-    fx = await buildScoringFixture({ playerCount: 4 })
+    fx = await buildScoringFixture({ playerCount: 4, leaveClosed: true })
+    const reopenDraft = await fx.service.from('events')
+      .update({ status: 'draft' })
+      .eq('id', fx.eventId)
+    if (reopenDraft.error) throw reopenDraft.error
 
     flightA = randomUUID()
     flightB = randomUUID()
@@ -110,6 +114,19 @@ describe('flights and divisions (§5.2, §8.7)', () => {
       ),
     )
     if (ents.error) throw ents.error
+
+    const republish = await fx.service.from('events')
+      .update({ status: 'published' })
+      .eq('id', fx.eventId)
+    if (republish.error) throw republish.error
+    const open = await fx.service.from('events')
+      .update({ status: 'scoring_open' })
+      .eq('id', fx.eventId)
+    if (open.error) throw open.error
+    const startRound = await fx.service.from('rounds')
+      .update({ status: 'in_progress' })
+      .eq('id', fx.roundId)
+    if (startRound.error) throw startRound.error
 
     // Gross per hole. A flight plays better than B flight throughout, so a
     // field-wide ranking would put both A players above both B players and

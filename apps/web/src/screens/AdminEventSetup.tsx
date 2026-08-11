@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 
 import { publishEvent, saveEventDraft } from '../lib/phase1.ts';
@@ -24,7 +24,8 @@ type HandicapRecord = {
 export function AdminEventSetup() {
   const { eventId: routeEventId = 'new' } = useParams();
   const navigate = useNavigate();
-  const [savedEventId, setSavedEventId] = useState(routeEventId === 'new' ? null : routeEventId);
+  const [draftEventId, setDraftEventId] = useState(routeEventId === 'new' ? null : routeEventId);
+  const [isDirty, setIsDirty] = useState(routeEventId === 'new');
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,8 +33,22 @@ export function AdminEventSetup() {
   const [preset, setPreset] = useState<CompetitionPreset | null>(null);
   const [teamDrafts, setTeamDrafts] = useState<TeamDraft[] | null>(null);
   const [selectedTeeSetId, setSelectedTeeSetId] = useState<string | null>(null);
-  const [flightDrafts, setFlightDrafts] = useState<FlightDraft[]>([]);
+  const [flightDrafts, setFlightDrafts] = useState<FlightDraft[] | null>(null);
   const [selectedStartsAt, setSelectedStartsAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraftEventId(routeEventId === 'new' ? null : routeEventId);
+    setIsDirty(routeEventId === 'new');
+    setSelectedIds(null);
+    setPreset(null);
+    setTeamDrafts(null);
+    setSelectedTeeSetId(null);
+    setFlightDrafts(null);
+    setSelectedStartsAt(null);
+    setMessage(null);
+    setError(null);
+  }, [routeEventId]);
+
   const query = useQuery({
     queryKey: ['event-builder', routeEventId],
     queryFn: async () => {
@@ -56,12 +71,22 @@ export function AdminEventSetup() {
       let round = null;
       let entryParticipantIds: string[] = [];
       let existingTeams: TeamDraft[] = [];
+      let existingFlights: FlightDraft[] = [];
+      let existingScorerProfileIds: string[] = [];
       if (routeEventId !== 'new') {
-        const [{ data: rounds }, { data: entries }, { data: teams }] = await Promise.all([
+        const [roundResult, entryResult, teamResult, flightResult, markerResult] = await Promise.all([
           supabase.from('rounds').select('id,source_tee_set_id').eq('event_id', routeEventId).order('round_number'),
-          supabase.from('event_entries').select('participant_id').eq('event_id', routeEventId),
+          supabase.from('event_entries').select('participant_id,flight_id').eq('event_id', routeEventId),
           supabase.from('event_teams').select('id,name,event_team_members(position,event_entries(participant_id))').eq('event_id', routeEventId).order('created_at'),
+          supabase.from('flights').select('id,name,sort_order').eq('event_id', routeEventId).order('sort_order'),
+          supabase.from('scoring_permissions').select('scorer_profile_id').eq('event_id', routeEventId).eq('permission_type', 'marker').is('valid_to', null),
         ]);
+        const setupError = roundResult.error ?? entryResult.error ?? teamResult.error ?? flightResult.error ?? markerResult.error;
+        if (setupError) throw setupError;
+        const rounds = roundResult.data;
+        const entries = entryResult.data;
+        const teams = teamResult.data;
+        const flights = flightResult.data;
         round = rounds?.[0] ?? null;
         entryParticipantIds = (entries ?? []).map((entry) => entry.participant_id);
         existingTeams = ((teams ?? []) as unknown as Array<{
@@ -73,13 +98,29 @@ export function AdminEventSetup() {
             .toSorted((a, b) => a.position - b.position)
             .map((member) => relationValue(member.event_entries)?.participant_id ?? ''),
         })).filter((team) => team.participantIds.length >= 2 && team.participantIds.length <= 4 && team.participantIds.every(Boolean));
+        existingFlights = (flights ?? []).map((flight) => ({
+          id: flight.id,
+          name: flight.name,
+          participantIds: (entries ?? [])
+            .filter((entry) => entry.flight_id === flight.id)
+            .map((entry) => entry.participant_id),
+        }));
+        existingScorerProfileIds = [...new Set(
+          (markerResult.data ?? []).map((permission) => permission.scorer_profile_id),
+        )];
       }
       const teeSets = (courses ?? []).flatMap((course) => course.course_layouts.flatMap((layout) => layout.tee_sets.filter((tee) => tee.status === 'active').map((tee) => ({ ...tee, label: `${course.name} · ${layout.name} · ${tee.name}` }))));
-      return { leagueId, league: leagues?.find((league) => league.id === leagueId), seasons: seasons ?? [], participants: participants ?? [], teeSets, existing, round, entryParticipantIds, existingTeams };
+      return { leagueId, league: leagues?.find((league) => league.id === leagueId), seasons: seasons ?? [], participants: participants ?? [], teeSets, existing, round, entryParticipantIds, existingTeams, existingFlights, existingScorerProfileIds };
     },
   });
 
   if (query.isLoading) return <div className="screen"><div className="skeleton skeleton--form" /></div>;
+  if (query.isError) return (
+    <div className="screen">
+      <p className="form-message form-message--error" role="alert">Event setup could not be loaded. Your saved draft was not changed.</p>
+      <button className="button button--secondary" type="button" onClick={() => void query.refetch()}>Try again</button>
+    </div>
+  );
   if (!query.data) return <p className="form-message form-message--error">Organizer access is required to build an event.</p>;
   const data = query.data;
   const existing = data.existing;
@@ -94,6 +135,7 @@ export function AdminEventSetup() {
   const activeTeams = teamDrafts ?? (data.existingTeams.length
     ? data.existingTeams
     : groupParticipants(activeIds, effectiveTeamSize));
+  const activeFlightDrafts = flightDrafts ?? data.existingFlights;
   const defaultStart = existing?.starts_at ? localDateTime(existing.starts_at) : localDateTime(new Date(Date.now() + 7 * 86400000).toISOString());
   const activeStartsAt = selectedStartsAt ?? defaultStart;
   const activeTeeSetId = selectedTeeSetId ?? data.round?.source_tee_set_id ?? data.teeSets[0]?.id ?? '';
@@ -145,6 +187,11 @@ export function AdminEventSetup() {
       : activeIds.length % 4 === 0 && activeTeams.length % 2 === 0)
   );
   const handicapsValid = !isTeamEvent || handicapReview.every((row) => row.handicap !== null);
+  const flightValidationError = validateFlightDrafts(
+    activeFlightDrafts,
+    activeIds,
+    isTeamEvent ? activeTeams : [],
+  );
 
   if (existing && existing.status !== 'draft') {
     return (
@@ -161,7 +208,11 @@ export function AdminEventSetup() {
     const next = data.participants.filter((participant) => nextSet.has(participant.id)).map((participant) => participant.id);
     setSelectedIds(next);
     setTeamDrafts(groupParticipants(next, effectiveTeamSize));
-    setSavedEventId(null);
+    setFlightDrafts(activeFlightDrafts.map((flight) => ({
+      ...flight,
+      participantIds: flight.participantIds.filter((id) => nextSet.has(id)),
+    })));
+    markDirty();
   }
 
   function updateTeamMember(teamIndex: number, slot: number, participantId: string) {
@@ -175,18 +226,40 @@ export function AdminEventSetup() {
     if (!targetTeam) return;
     targetTeam.participantIds[slot] = participantId;
     setTeamDrafts(next);
-    setSavedEventId(null);
+    markDirty();
+  }
+
+  function markDirty() {
+    setIsDirty(true);
+    setError(null);
+    setMessage(null);
   }
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSubmitting(true); setError(null); setMessage(null);
+    setError(null); setMessage(null);
+    const normalizedFlights = activeFlightDrafts.map((flight) => ({
+      ...flight,
+      name: flight.name.trim(),
+    }));
+    const invalidFlights = validateFlightDrafts(
+      normalizedFlights,
+      activeIds,
+      isTeamEvent ? activeTeams : [],
+    );
+    if (invalidFlights) {
+      setError(invalidFlights);
+      return;
+    }
+
+    setIsDirty(true);
+    setSubmitting(true);
     const form = new FormData(event.currentTarget);
     try {
       const startsAt = new Date(String(form.get('startsAt'))).toISOString();
       const endsValue = String(form.get('endsAt') ?? '');
       const result = await saveEventDraft({
-        ...(savedEventId ? { eventId: savedEventId } : {}),
+        ...(draftEventId ? { eventId: draftEventId } : {}),
         leagueId: data.leagueId,
         seasonId: String(form.get('seasonId')),
         name: String(form.get('name')),
@@ -200,29 +273,32 @@ export function AdminEventSetup() {
         competitionPreset: activePreset,
         teams: isTeamEvent ? activeTeams : [],
       });
-      // Flights are a separate explicit call: they are not part of the draft
-      // RPC's contract, and an event with no divisions must not pay for them.
-      if (flightDrafts.length > 0) {
-        const named = flightDrafts
-          .map((flight) => ({ ...flight, name: flight.name.trim() }))
-          .filter((flight) => flight.name !== '');
-        if (named.length !== flightDrafts.length) {
-          throw new Error('Every flight needs a name before the draft can save.');
-        }
-        const { data: flightResult, error: flightError } = await getSupabaseClient().rpc(
-          'set_event_flights',
-          { p_event_id: result.eventId, p_flights: named },
+      // Keep the event identity as soon as the first transaction succeeds. If
+      // the flight transaction fails, retry updates this draft instead of
+      // creating another event.
+      setDraftEventId(result.eventId);
+      const { data: flightResult, error: flightError } = await getSupabaseClient().rpc(
+        'set_event_flights',
+        { p_event_id: result.eventId, p_flights: normalizedFlights },
+      );
+      const response = flightResult as {
+        status?: string;
+        detail?: string;
+        flights?: unknown;
+      } | null;
+      if (flightError || response?.status !== 'saved') {
+        throw new Error(
+          response?.detail
+            ?? flightError?.message
+            ?? 'Flights could not be saved.',
         );
-        const status = (flightResult as { status?: string; detail?: string } | null)?.status;
-        if (flightError || status !== 'saved') {
-          throw new Error(
-            (flightResult as { detail?: string } | null)?.detail
-              ?? flightError?.message
-              ?? 'Flights could not be saved.',
-          );
-        }
       }
-      setSavedEventId(result.eventId);
+      const savedFlights = parseSavedFlights(response.flights);
+      if (!savedFlights) {
+        throw new Error('The draft saved, but its flight identities could not be confirmed. Save again before publishing.');
+      }
+      setFlightDrafts(savedFlights);
+      setIsDirty(false);
       setMessage('Draft saved. Server preflight passed and the event is ready to publish.');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not save the event.');
@@ -230,11 +306,11 @@ export function AdminEventSetup() {
   }
 
   async function publish() {
-    if (!savedEventId) return;
-    setSubmitting(true); setError(null);
+    if (!draftEventId || isDirty) return;
+    setSubmitting(true); setError(null); setMessage(null);
     try {
-      await publishEvent({ eventId: savedEventId, openScoring: true });
-      navigate(`/events/${savedEventId}`);
+      await publishEvent({ eventId: draftEventId, openScoring: true });
+      navigate(`/events/${draftEventId}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Publish failed. Review preflight and try again.');
     } finally { setSubmitting(false); }
@@ -252,7 +328,7 @@ export function AdminEventSetup() {
       </header>
       {error && <p className="form-message form-message--error" role="alert">{error}</p>}
       {message && <p className="form-message form-message--success" role="status">{message}</p>}
-      <form className="builder-form" onSubmit={(event) => void save(event)}>
+      <form className="builder-form" key={routeEventId} onChange={markDirty} onSubmit={(event) => void save(event)}>
         <section>
           <div className="builder-step">
             <span>1</span>
@@ -262,7 +338,7 @@ export function AdminEventSetup() {
             <div className="field field--wide"><label htmlFor="event-name">Event name</label><input id="event-name" name="name" defaultValue={existing?.name ?? ''} required minLength={3} maxLength={100} /></div>
             <div className="field"><label htmlFor="season">Season</label><select id="season" name="seasonId" defaultValue={data.seasons.find((season) => season.status === 'active')?.id ?? data.seasons[0]?.id} required>{data.seasons.map((season) => <option key={season.id} value={season.id}>{season.name}</option>)}</select></div>
             <div className="field"><label htmlFor="visibility">Visibility</label><select id="visibility" name="visibility" defaultValue={existing?.visibility ?? 'league'}><option value="league">League members</option><option value="public">Public</option><option value="organizers">Organizers only</option></select></div>
-            <div className="field"><label htmlFor="starts-at">Starts</label><input id="starts-at" name="startsAt" type="datetime-local" value={activeStartsAt} onChange={(event) => { setSelectedStartsAt(event.target.value); setSavedEventId(null); }} required /></div>
+            <div className="field"><label htmlFor="starts-at">Starts</label><input id="starts-at" name="startsAt" type="datetime-local" value={activeStartsAt} onChange={(event) => setSelectedStartsAt(event.target.value)} required /></div>
             <div className="field"><label htmlFor="ends-at">Ends (optional)</label><input id="ends-at" name="endsAt" type="datetime-local" defaultValue={existing?.ends_at ? localDateTime(existing.ends_at) : ''} /></div>
             <div className="field field--wide"><label htmlFor="timezone">Venue timezone</label><input id="timezone" name="timezone" defaultValue={existing?.timezone ?? data.league?.timezone ?? 'America/Detroit'} required /></div>
           </div>
@@ -275,7 +351,7 @@ export function AdminEventSetup() {
           </div>
           <div className="field">
             <label htmlFor="tee-set">Tee set</label>
-            <select id="tee-set" name="teeSetId" value={activeTeeSetId} onChange={(event) => { setSelectedTeeSetId(event.target.value); setSavedEventId(null); }} required>
+            <select id="tee-set" name="teeSetId" value={activeTeeSetId} onChange={(event) => setSelectedTeeSetId(event.target.value)} required>
               {data.teeSets.map((tee) => <option key={tee.id} value={tee.id}>{tee.label} · Par {tee.par} · {tee.course_rating}/{tee.slope_rating}</option>)}
             </select>
           </div>
@@ -292,7 +368,6 @@ export function AdminEventSetup() {
               const nextPreset = event.target.value as CompetitionPreset;
               setPreset(nextPreset);
               setTeamDrafts(groupParticipants(activeIds, teamSizeForPreset(nextPreset) ?? 2));
-              setSavedEventId(null);
             }}>
               <option value="two_person_throwdown">Two-person throwdown · six competitions</option>
               <option value="three_player_scramble">Three-player scramble · gross and net</option>
@@ -357,7 +432,7 @@ export function AdminEventSetup() {
               {!pairingsValid && <p className="form-message form-message--warning">{pairingMessage(activePreset)}</p>}
               {activeTeams.map((team, teamIndex) => (
                 <div className={`team-pairing team-pairing--${effectiveTeamSize}`} key={`${teamIndex}-${team.participantIds.join('-')}`}>
-                  <label className="field team-pairing__name"><span>Team name</span><input value={team.name} maxLength={80} onChange={(event) => { const next = [...activeTeams]; next[teamIndex] = { ...team, name: event.target.value }; setTeamDrafts(next); setSavedEventId(null); }} required /></label>
+                  <label className="field team-pairing__name"><span>Team name</span><input value={team.name} maxLength={80} onChange={(event) => { const next = [...activeTeams]; next[teamIndex] = { ...team, name: event.target.value }; setTeamDrafts(next); }} required /></label>
                   {Array.from({ length: effectiveTeamSize }, (_, slot) => (
                     <label className="field" key={slot}>
                       <span>Player {slot + 1}</span>
@@ -376,7 +451,7 @@ export function AdminEventSetup() {
             <legend>Marker access (optional)</legend>
             {data.participants.filter((participant) => participant.profile_id).map((participant) => (
               <label key={participant.id}>
-                <input type="checkbox" name="scorerProfileIds" value={participant.profile_id!} />
+                <input type="checkbox" name="scorerProfileIds" value={participant.profile_id!} defaultChecked={data.existingScorerProfileIds.includes(participant.profile_id!)} />
                 <span><strong>{participant.display_name}</strong><small>Can score the entire field</small></span>
               </label>
             ))}
@@ -388,13 +463,14 @@ export function AdminEventSetup() {
             <span>4</span>
             <div>
               <h2>Flights and divisions</h2>
-              <p>Optional. Each flight is ranked separately and, where a competition pools skins by flight, keeps its own pool.</p>
+              <p>Optional. If you add flights, assign every selected player exactly once. Each flight receives its own ranking and skins pool.</p>
             </div>
           </div>
           <div className="flight-builder">
-            {flightDrafts.length === 0
+            {flightValidationError && <p id="flight-validation" className="form-message form-message--warning">{flightValidationError}</p>}
+            {activeFlightDrafts.length === 0
               ? <p className="muted">No flights: the whole field is ranked together.</p>
-              : flightDrafts.map((flight, flightIndex) => (
+              : activeFlightDrafts.map((flight, flightIndex) => (
                 <article key={flight.id ?? `draft-${flightIndex}`} className="flight-draft">
                   <div className="flight-draft__head">
                     <label className="field">
@@ -403,20 +479,22 @@ export function AdminEventSetup() {
                         value={flight.name}
                         maxLength={60}
                         placeholder="A Flight"
+                        aria-describedby={flightValidationError ? 'flight-validation' : undefined}
+                        required
                         onChange={(event) => {
-                          const next = [...flightDrafts];
+                          const next = [...activeFlightDrafts];
                           next[flightIndex] = { ...flight, name: event.target.value };
                           setFlightDrafts(next);
-                          setSavedEventId(null);
                         }}
                       />
                     </label>
                     <button
                       type="button"
                       className="button button--quiet button--small"
+                      aria-label={`Remove ${flight.name.trim() || `flight ${flightIndex + 1}`}`}
                       onClick={() => {
-                        setFlightDrafts(flightDrafts.filter((_, i) => i !== flightIndex));
-                        setSavedEventId(null);
+                        setFlightDrafts(activeFlightDrafts.filter((_, i) => i !== flightIndex));
+                        markDirty();
                       }}
                     >
                       Remove
@@ -436,7 +514,7 @@ export function AdminEventSetup() {
                               type="checkbox"
                               checked={checked}
                               onChange={() => {
-                                const next = flightDrafts.map((candidate, i) => ({
+                                const next = activeFlightDrafts.map((candidate, i) => ({
                                   ...candidate,
                                   participantIds: i === flightIndex
                                     ? (checked
@@ -445,7 +523,6 @@ export function AdminEventSetup() {
                                     : candidate.participantIds.filter((id) => id !== participant.id),
                                 }));
                                 setFlightDrafts(next);
-                                setSavedEventId(null);
                               }}
                             />
                             <span><strong>{participant.display_name}</strong></span>
@@ -459,8 +536,8 @@ export function AdminEventSetup() {
               type="button"
               className="button button--secondary"
               onClick={() => {
-                setFlightDrafts([...flightDrafts, { name: '', participantIds: [] }]);
-                setSavedEventId(null);
+                setFlightDrafts([...activeFlightDrafts, { name: '', participantIds: [] }]);
+                markDirty();
               }}
             >
               Add flight
@@ -479,14 +556,86 @@ export function AdminEventSetup() {
             <li>Tee par, rating, slope, and stroke indexes are complete</li>
             <li>Course Handicap and immutable roster snapshots will be frozen</li>
           </ul>
+          <p id="draft-save-state" className="muted" role="status">
+            {isDirty
+              ? draftEventId
+                ? 'Unsaved changes. Save the draft again before publishing.'
+                : 'Save this draft before publishing.'
+              : 'All setup changes are saved and ready for publication.'}
+          </p>
           <div className="builder-actions">
-            <button className="button button--secondary" type="submit" disabled={submitting || activeIds.length === 0 || !pairingsValid || !handicapsValid}>{submitting ? 'Working…' : 'Save draft'}</button>
-            <button className="button button--primary" type="button" onClick={() => void publish()} disabled={!savedEventId || submitting}>Publish and open scoring</button>
+            <button className="button button--secondary" type="submit" disabled={submitting || activeIds.length === 0 || !pairingsValid || !handicapsValid || flightValidationError !== null}>{submitting ? 'Saving…' : 'Save draft'}</button>
+            <button className="button button--primary" type="button" aria-describedby="draft-save-state" onClick={() => void publish()} disabled={!draftEventId || isDirty || submitting}>Publish and open scoring</button>
           </div>
         </section>
       </form>
     </div>
   );
+}
+
+function validateFlightDrafts(
+  flights: FlightDraft[],
+  activeParticipantIds: string[],
+  teams: TeamDraft[],
+): string | null {
+  if (flights.length === 0) return null;
+
+  const activeIds = new Set(activeParticipantIds);
+  const seenNames = new Set<string>();
+  const flightByParticipant = new Map<string, number>();
+  for (const [flightIndex, flight] of flights.entries()) {
+    const name = flight.name.trim();
+    if (name === '') return `Flight ${flightIndex + 1} needs a name.`;
+    const nameKey = name.toLocaleLowerCase('en-US');
+    if (seenNames.has(nameKey)) return `Flight names must be unique. “${name}” appears more than once.`;
+    seenNames.add(nameKey);
+    if (flight.participantIds.length === 0) return `${name} needs at least one player.`;
+
+    for (const participantId of flight.participantIds) {
+      if (!activeIds.has(participantId)) {
+        return `${name} includes a player who is no longer in the event field.`;
+      }
+      if (flightByParticipant.has(participantId)) {
+        return 'Each selected player can belong to only one flight.';
+      }
+      flightByParticipant.set(participantId, flightIndex);
+    }
+  }
+
+  if (flightByParticipant.size !== activeIds.size) {
+    return 'Assign every selected player to exactly one flight, or remove all flights to rank the field together.';
+  }
+
+  for (const team of teams) {
+    const teamFlights = new Set(team.participantIds.map((id) => flightByParticipant.get(id)));
+    if (teamFlights.size !== 1 || teamFlights.has(undefined)) {
+      return `${team.name.trim() || 'Each team'} must stay together in one flight.`;
+    }
+  }
+  return null;
+}
+
+function parseSavedFlights(value: unknown): FlightDraft[] | null {
+  if (!Array.isArray(value)) return null;
+  const parsed: FlightDraft[] = [];
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== 'object') return null;
+    const row = candidate as Record<string, unknown>;
+    if (
+      typeof row.id !== 'string'
+      || typeof row.name !== 'string'
+      || !Array.isArray(row.participantIds)
+      || !row.participantIds.every((id) => typeof id === 'string')
+    ) {
+      return null;
+    }
+    parsed.push({
+      id: row.id,
+      name: row.name,
+      participantIds: row.participantIds as string[],
+    });
+  }
+  return parsed;
 }
 
 function groupParticipants(participantIds: string[], teamSize: number): TeamDraft[] {

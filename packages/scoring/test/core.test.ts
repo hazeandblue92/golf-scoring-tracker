@@ -15,7 +15,7 @@ import {
   allocateStrokes,
   strokesReceivedOnHole,
 } from '../src/handicap/allocation.ts'
-import { canonicalJson, sha256Hex } from '../src/canonical.ts'
+import { canonicalJson, canonicalNumericResult, sha256Hex } from '../src/canonical.ts'
 import { assignRanks, computeHole, computeTotals } from '../src/common.ts'
 import type { HoleSnapshot } from '../src/types.ts'
 
@@ -196,6 +196,12 @@ describe('canonical JSON and result hash (spec §7.3)', () => {
   it('sorts keys and forbids non-integer numbers', () => {
     expect(canonicalJson({ b: 1, a: [2, 'x'] })).toBe('{"a":[2,"x"],"b":1}')
     expect(() => canonicalJson({ v: 0.5 })).toThrow(/safe integers/)
+  })
+
+  it('encodes computed decimal results as canonical strings', () => {
+    expect(canonicalNumericResult(12)).toBe(12)
+    expect(canonicalNumericResult(40.9959)).toBe('40.9959')
+    expect(() => canonicalNumericResult(Number.POSITIVE_INFINITY)).toThrow(/finite/)
   })
 
   it('byte-equivalent output for equivalent inputs regardless of key order', () => {

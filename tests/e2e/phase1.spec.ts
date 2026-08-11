@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 
-import { createAccount, LEAGUE_ID } from '../integration/helpers/fixture.ts';
+import { createAccount, LEAGUE_ID, totpCode } from '../integration/helpers/fixture.ts';
 import { serviceClient } from '../integration/helpers/stack.ts';
 
 let organizer: Awaited<ReturnType<typeof createAccount>>;
@@ -51,9 +51,35 @@ async function expectNarrowReflow(page: Page) {
   expect(overflow.offenders, JSON.stringify(overflow)).toEqual([]);
 }
 
+async function signInOrganizer(page: Page) {
+  await page.goto('/sign-in');
+  await page.getByLabel('Username').fill(organizer.username);
+  await page.getByLabel('Password').fill(organizer.password);
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 30_000 });
+
+  const secret = organizer.totpSecret;
+  if (!secret) throw new Error('E2E organizer is missing its TOTP fixture secret');
+  await page.goto('/settings');
+  const security = page.getByRole('region', { name: 'Account security' });
+  const code = security.getByLabel('Six-digit authenticator code');
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await code.fill(totpCode(secret));
+    await security.getByRole('button', { name: 'Verify this session' }).click();
+    try {
+      await expect(security.getByText('Authenticator verified.')).toBeVisible({ timeout: 5_000 });
+      await page.goto('/dashboard');
+      return;
+    } catch {
+      if (attempt === 1) throw new Error('E2E organizer MFA challenge did not verify');
+      await page.waitForTimeout(1_000);
+    }
+  }
+}
+
 test.beforeAll(async () => {
   const service = serviceClient();
-  organizer = await createAccount(service, { displayName: 'E2E Organizer' });
+  organizer = await createAccount(service, { displayName: 'E2E Organizer', withMfa: true });
   const { error: membershipError } = await service.from('league_memberships').insert({
     league_id: LEAGUE_ID,
     profile_id: organizer.profileId,
@@ -79,11 +105,7 @@ test('sign-in and privacy pages meet the automated accessibility baseline', asyn
 });
 
 test('operator can review release health, capacity, recovery, and repair readiness', async ({ page }) => {
-  await page.goto('/sign-in');
-  await page.getByLabel('Username').fill(organizer.username);
-  await page.getByLabel('Password').fill(organizer.password);
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 30_000 });
+  await signInOrganizer(page);
 
   await page.goto('/admin/operations');
   await expect(page.getByRole('heading', { name: 'Operations', exact: true })).toBeVisible();
@@ -97,12 +119,8 @@ test('operator can review release health, capacity, recovery, and repair readine
   await expectNarrowReflow(page);
 });
 
-test('organizer creates, publishes, scores, finalizes, and exports a gross event', async ({ page }) => {
-  await page.goto('/sign-in');
-  await page.getByLabel('Username').fill(organizer.username);
-  await page.getByLabel('Password').fill(organizer.password);
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 30_000 });
+test('organizer creates, publishes, scores, finalizes, reopens, and exports a gross event', async ({ page }) => {
+  await signInOrganizer(page);
 
   await page.getByRole('link', { name: 'Create event' }).click();
   await page.getByLabel('Event name').fill('E2E Gross Championship');
@@ -133,9 +151,22 @@ test('organizer creates, publishes, scores, finalizes, and exports a gross event
 
   await page.goto(`/admin/events/${eventId}/scoring`);
   await expect(page.getByRole('heading', { name: 'Scoring control room' })).toBeVisible();
-  await page.getByLabel('Override reason (required only with blockers)').fill('E2E launch-path finalization override');
-  await page.getByRole('button', { name: 'Finalize all 1' }).click();
-  await expect(page.getByText(/Finalized 1 competition/)).toBeVisible({ timeout: 30_000 });
+  await page.getByLabel('Committee override reason').fill('E2E launch-path finalization override');
+  await page.getByRole('button', { name: 'Finalize', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm finalization' }).click();
+  await expect(page.getByText(/Individual Gross finalized\. Result hash/)).toBeVisible({ timeout: 30_000 });
+
+  // The audited correction loop from the §26 runbook: reopen the sealed
+  // result, then seal it again so the export carries a real final hash.
+  await page.getByRole('button', { name: 'Reopen', exact: true }).click();
+  await page.getByLabel('Reason for reopening').fill('E2E committee correction after review');
+  await page.getByRole('button', { name: 'Confirm reopen' }).click();
+  await expect(page.getByText(/Individual Gross reopened/)).toBeVisible({ timeout: 30_000 });
+
+  await page.getByLabel('Committee override reason').fill('E2E refinalization after the audited reopen');
+  await page.getByRole('button', { name: 'Finalize', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm finalization' }).click();
+  await expect(page.getByText(/Individual Gross finalized\. Result hash/)).toBeVisible({ timeout: 30_000 });
 
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export event' }).click();
@@ -143,11 +174,7 @@ test('organizer creates, publishes, scores, finalizes, and exports a gross event
 });
 
 test('organizer publishes the two-person preset and moves between shared-score results', async ({ page }) => {
-  await page.goto('/sign-in');
-  await page.getByLabel('Username').fill(organizer.username);
-  await page.getByLabel('Password').fill(organizer.password);
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 30_000 });
+  await signInOrganizer(page);
 
   await page.getByRole('link', { name: 'Create event' }).click();
   await page.getByLabel('Event name').fill('E2E Two-Person Throwdown');
@@ -218,11 +245,7 @@ test('organizer publishes the two-person preset and moves between shared-score r
 });
 
 test('organizer publishes a four-player scramble and enters one team ball', async ({ page }) => {
-  await page.goto('/sign-in');
-  await page.getByLabel('Username').fill(organizer.username);
-  await page.getByLabel('Password').fill(organizer.password);
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 30_000 });
+  await signInOrganizer(page);
 
   await page.getByRole('link', { name: 'Create event' }).click();
   await page.getByLabel('Event name').fill('E2E Four-Player Scramble');
