@@ -33,7 +33,7 @@ as a manual or production pass.
 | AC-REL-004 | Partial | Leaderboards poll every ten seconds in addition to Realtime. Add an outage test that disables the subscription, observes polling convergence, and proves no write is duplicated. |
 | AC-SEC-001 | Partial | `tests/integration/test/rls-security.test.ts` covers event/role boundaries and direct table attacks. Add an isolated second-league fixture to prove cross-league denial explicitly. |
 | AC-SEC-002 | Partial | `npm run test:security` detects Supabase privileged keys/JWTs, credentialed DB URLs, Cloudflare tokens, VAPID/private keys, and literal privileged environment values across browser bundles, tracked files, and likely log/export/environment artifacts without printing matches. It does not scan Git history or files outside the checkout; run provider history scanning and separately inspect production logs and generated exports. |
-| AC-SEC-003 | Demonstrated | `npm run test:security` compares source and built headers/CSP, rejects unsafe or local production origins, and scans every built JavaScript bundle. Verify the same headers on the deployed URL. |
+| AC-SEC-003 | Partial | `npm run test:security` compares source and built headers/CSP, rejects unsafe or local production origins, and scans every built JavaScript bundle. `npm run verify:deployment -- <url>` checks the same policy against a live origin, plus shell/asset caching and the SPA fallback, and the `Deploy` workflow runs it after every deployment. Retain one passing run against the release deployment. |
 | AC-SEC-004 | Demonstrated | Integration tests prove a retained, unexpired JWT loses mutation access immediately after profile disablement; account administration retains the profile/audit identity. Complete one production session-revocation drill. |
 | AC-COST-001 | Manual/deployment | Owner must record that Supabase, Cloudflare Pages, and public-repository Actions are on Free plans, use the generated `pages.dev` host, and have no payment method attached. |
 | AC-COST-002 | Manual/deployment | The repository has no required email/SMS or paid API flow. Owner must confirm production vendor configuration introduces none. |
@@ -43,6 +43,15 @@ as a manual or production pass.
 | AC-A11Y-001 | Partial | Playwright/axe and reflow automation cover core surfaces. Complete every Due row in `docs/accessibility-audit.md` and `docs/supported-device-matrix.md`. |
 | AC-A11Y-002 | Partial | Sync states use text/status semantics and automated accessibility checks. VoiceOver/TalkBack announcement cadence and field-error perception remain manual gates. |
 | AC-PERF-001 | Partial | CI enforces the bundle budget; the local supported-load profile passed. Production load, interaction responsiveness, and physical-device field evidence remain due. |
+
+## Deployment
+
+Nothing has been deployed yet. `docs/runbooks/deployment.md` holds the vendor
+setup, the required repository variables and secrets, and the release order —
+migrations first, then Edge Functions and the web app. Both workflows are
+manual; the migration workflow dry-runs by default. Until a deployment exists,
+every row above that names a deployed URL, a production capacity run, or a
+vendor plan confirmation stays open regardless of how green local automation is.
 
 ## §24 zero-cost release gates
 

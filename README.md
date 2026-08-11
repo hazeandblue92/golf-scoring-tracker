@@ -23,6 +23,7 @@ npm run test:e2e             # Chromium, Firefox, WebKit, and Pixel 7 matrix
 npm run test:bundle-budget   # enforce the 250 KiB initial JS limit
 npm run test:security        # verify CSP/headers and scan bundles/source/artifacts
 npm run test:licenses        # enforce the reviewed dependency license list
+npm run verify:deployment -- https://<host>   # check a deployed origin's headers and caching
 ```
 
 ## Repository layout (spec §13.4)
@@ -38,7 +39,7 @@ supabase/seed.sql         Deterministic development fixtures
 tests/e2e/                Playwright suites
 tests/integration/        Database, Edge Function, RLS/RPC tests
 docs/                     ADRs, runbooks, data dictionary
-.github/workflows/        CI, deploy, backup, dependency review
+.github/workflows/        CI, deploy, database migrations, backup, dependency review
 apps/web/public/          Host headers, redirects, and static web assets
 ```
 

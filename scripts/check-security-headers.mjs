@@ -5,24 +5,17 @@ import {
   scanBrowserBundles,
   scanRepositorySecrets,
 } from './lib/secret-scan.mjs';
+import {
+  FORBIDDEN_CSP_ALLOWANCES,
+  FORBIDDEN_CSP_ORIGINS,
+  headerExpectation,
+  REQUIRED_CSP_DIRECTIVES,
+  REQUIRED_HEADERS,
+} from './lib/security-headers.mjs';
 
-const requiredHeaders = [
-  'Content-Security-Policy:',
-  'Cross-Origin-Opener-Policy: same-origin',
-  'Permissions-Policy:',
-  'Referrer-Policy: no-referrer',
-  'Strict-Transport-Security:',
-  'X-Content-Type-Options: nosniff',
-  'X-Frame-Options: DENY',
-];
-const requiredDirectives = [
-  "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self'",
-  "object-src 'none'",
-  "frame-ancestors 'none'",
-];
-const forbiddenCsp = ["script-src 'self' 'unsafe-inline'", "script-src 'self' 'unsafe-eval'"];
+const requiredHeaders = REQUIRED_HEADERS.map(headerExpectation);
+const requiredDirectives = REQUIRED_CSP_DIRECTIVES;
+const forbiddenCsp = FORBIDDEN_CSP_ALLOWANCES;
 const headersPath = path.resolve('apps/web/public/_headers');
 const distHeadersPath = path.resolve('apps/web/dist/_headers');
 const [headers, distHeaders] = await Promise.all([
@@ -52,11 +45,7 @@ for (const forbidden of forbiddenCsp) {
 // Nothing local reads it: Vite's dev server (which Playwright drives) never
 // applies _headers, so a localhost or plaintext origin here buys no local
 // convenience and only widens what the production page may talk to.
-for (const [label, pattern] of [
-  ['loopback origin', /(?:127\.0\.0\.1|\[?::1\]?|localhost)/],
-  ['plaintext http origin', /(?:^|\s)http:\/\//],
-  ['plaintext websocket origin', /(?:^|\s)ws:\/\//],
-]) {
+for (const [label, pattern] of FORBIDDEN_CSP_ORIGINS) {
   for (const [source, policy] of [['source', headers], ['built', distHeaders]]) {
     const csp = policy
       .split('\n')

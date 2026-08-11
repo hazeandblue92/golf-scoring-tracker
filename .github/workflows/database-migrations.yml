@@ -1,0 +1,90 @@
+name: Database migrations
+
+# Schema is the one deployment step a redeploy cannot undo, so this workflow
+# is separate from `deploy.yml`, is manual only, and dry-runs by default. The
+# owner reads the plan, then re-runs with mode=apply.
+#
+# Order matters on a release: apply migrations FIRST, then deploy Edge
+# Functions and the web app. The functions call RPCs that a migration may add
+# (`reopen_competition` is the current example), and `health` reports a schema
+# version the operations screen compares against the release.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: dry-run prints the plan; apply pushes it to the hosted project
+        type: choice
+        options: [dry-run, apply]
+        default: dry-run
+
+permissions:
+  contents: read
+
+concurrency:
+  group: database-migrations
+  cancel-in-progress: false
+
+jobs:
+  # Always runs, on both modes. Read this job's log before approving an apply.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Refuse to run without Supabase configuration
+        run: |
+          test -n "$SUPABASE_ACCESS_TOKEN" \
+            || { echo '::error::secret SUPABASE_ACCESS_TOKEN is not set'; exit 1; }
+          test -n "$SUPABASE_DB_PASSWORD" \
+            || { echo '::error::secret SUPABASE_DB_PASSWORD is not set'; exit 1; }
+          test -n "$PROJECT_REF" \
+            || { echo '::error::repository variable SUPABASE_PROJECT_REF is not set'; exit 1; }
+
+      - name: Link the hosted project
+        run: supabase link --project-ref "$PROJECT_REF"
+
+      - name: Migrations the hosted project already has
+        run: supabase migration list --linked
+
+      - name: Plan
+        run: supabase db push --linked --dry-run
+
+  # A separate job rather than a conditional step, so `production-database` can
+  # carry a required reviewer without gating the read-only plan above.
+  apply:
+    needs: plan
+    if: inputs.mode == 'apply'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production-database
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link the hosted project
+        run: supabase link --project-ref "$PROJECT_REF"
+
+      # Printed again here so the log records what was about to change in the
+      # moments before it changed, not in a job that ran earlier.
+      - name: Plan, immediately before applying
+        run: supabase db push --linked --dry-run
+
+      - name: Apply
+        run: supabase db push --linked
+
+      - name: Confirm the applied state
+        run: supabase migration list --linked

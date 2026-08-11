@@ -1,0 +1,224 @@
+name: Deploy
+
+# Deployment is a deliberate operator action, not a side effect of a push
+# (§24, season-launch checklist). Work lands on `main` continuously; a live
+# event runs against whatever was last deployed, so the owner chooses when
+# that changes.
+#
+# Database migrations are NOT here. They live in `database-migrations.yml`,
+# which dry-runs by default, because applying schema to the hosted project is
+# the one deployment step that cannot be rolled back by redeploying.
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which surface to deploy
+        type: choice
+        options: [all, web, functions]
+        default: all
+      deployment_url:
+        description: >-
+          Origin to verify after deploying, e.g. https://<project>.pages.dev.
+          Leave blank to skip the live check.
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  # The release gates run again here against this exact commit. CI proves a
+  # commit was green when it landed; this proves the artifact being shipped is
+  # green now, on the same runner that produces it.
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Refuse to build without public Supabase configuration
+        run: |
+          test -n "$VITE_SUPABASE_URL" \
+            || { echo '::error::repository variable VITE_SUPABASE_URL is not set'; exit 1; }
+          test -n "$VITE_SUPABASE_PUBLISHABLE_KEY" \
+            || { echo '::error::repository variable VITE_SUPABASE_PUBLISHABLE_KEY is not set'; exit 1; }
+          case "$VITE_SUPABASE_URL" in
+            https://*) ;;
+            *) echo "::error::VITE_SUPABASE_URL must be https, got $VITE_SUPABASE_URL"; exit 1 ;;
+          esac
+
+      - name: Clean install from lockfile (§16.3)
+        run: npm ci
+      - name: Type check (§16.3)
+        run: npm run typecheck
+      - name: Type check Edge Functions (§12, §16.3)
+        run: npm run typecheck:functions
+      - name: Unit, property, and golden tests (§16.3)
+        run: npx vitest run
+      - name: Static source lint (§16.3)
+        run: npm run lint
+
+      # The release identifier reaches the score-write path as `clientRelease`
+      # (§12.3), so it must satisfy the contract's semver pattern. Build
+      # metadata carries the commit that produced the bundle.
+      - name: Stamp the release version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          echo "VITE_RELEASE_VERSION=${version}+${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Production web build (§16.3)
+        run: npm run build --workspace apps/web --if-present
+      - name: Initial JavaScript budget (§19.1)
+        run: npm run test:bundle-budget
+      - name: CSP, security headers, and secret scan (§13, §23.3)
+        run: npm run test:security
+
+      # Upload the built bytes so the deploy job ships exactly what passed,
+      # rather than a second build that merely came from the same source.
+      - name: Retain the verified bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+          retention-days: 7
+          if-no-files-found: error
+
+  web:
+    needs: gate
+    if: inputs.target == 'all' || inputs.target == 'web'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore the verified bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+
+      - name: Refuse to deploy without Cloudflare configuration
+        env:
+          PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+        run: |
+          test -n "$PROJECT" \
+            || { echo '::error::repository variable CLOUDFLARE_PAGES_PROJECT is not set'; exit 1; }
+          test -f apps/web/dist/_headers \
+            || { echo '::error::built _headers is missing; the host would serve no CSP'; exit 1; }
+          test -f apps/web/dist/_redirects \
+            || { echo '::error::built _redirects is missing; deep links would 404'; exit 1; }
+
+      # Cloudflare Pages Free on the generated pages.dev hostname. No custom
+      # domain, no paid add-on, no payment method (§24).
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >-
+            pages deploy apps/web/dist
+            --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+            --branch=main
+            --commit-dirty=true
+
+  functions:
+    needs: gate
+    if: inputs.target == 'all' || inputs.target == 'functions'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Refuse to deploy without Supabase configuration
+        run: |
+          test -n "$SUPABASE_ACCESS_TOKEN" \
+            || { echo '::error::secret SUPABASE_ACCESS_TOKEN is not set'; exit 1; }
+          test -n "$PROJECT_REF" \
+            || { echo '::error::repository variable SUPABASE_PROJECT_REF is not set'; exit 1; }
+
+      # Supabase injects SUPABASE_URL and the key variables into hosted
+      # functions, but not RELEASE_VERSION — and `health` reports it as the
+      # Edge version the launch checklist compares against the web app. Derive
+      # it exactly as the web build does so the two cannot drift.
+      - name: Set the Edge release version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          supabase secrets set "RELEASE_VERSION=${version}+${GITHUB_SHA::7}" \
+            --project-ref "$PROJECT_REF"
+
+      # Deploys every function under supabase/functions. The three public
+      # endpoints (username-login, health, report-error) keep gateway JWT
+      # verification disabled through their `verify_jwt = false` entries in
+      # supabase/config.toml and enforce their own checks in-function.
+      - name: Deploy Edge Functions (§12.2)
+        run: supabase functions deploy --project-ref "$PROJECT_REF"
+
+      # health is a public endpoint (verify_jwt = false) that reports the app,
+      # Edge, engine, and schema versions the launch checklist compares.
+      - name: Report the deployed schema and engine versions
+        run: |
+          curl --fail --silent --show-error \
+            "https://${PROJECT_REF}.supabase.co/functions/v1/health" | tee health.json
+          echo
+          node -e "
+            const fs = require('fs');
+            const health = JSON.parse(fs.readFileSync('health.json', 'utf8'));
+            if (health.status === 'unavailable') {
+              console.error('::error::health reports unavailable after deploy');
+              process.exit(1);
+            }
+            if (health.status !== 'ok') {
+              console.warn('::warning::health reports ' + health.status);
+            }
+          "
+
+  # Proves the host actually serves the policy the repository declares. Skipped
+  # when no URL is supplied, because a Pages project's hostname is not derivable
+  # from anything in the repository.
+  verify:
+    needs: [web]
+    if: inputs.deployment_url != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # Pages serves the new deployment within seconds, but not instantly.
+      - name: Wait for the deployment to answer
+        env:
+          DEPLOYMENT_URL: ${{ inputs.deployment_url }}
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if curl --fail --silent --show-error --output /dev/null "$DEPLOYMENT_URL"; then
+              echo "reachable after ${attempt} attempt(s)"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$DEPLOYMENT_URL did not answer within 60 seconds"
+          exit 1
+
+      - name: Verify deployed CSP, headers, caching, and SPA fallback (§23.3)
+        run: npm run verify:deployment -- "${{ inputs.deployment_url }}"
