@@ -62,7 +62,13 @@ small { color: var(--muted); }
 
 .page-header { margin-bottom: 2rem; }
 .page-header > p, .event-masthead > p { color: var(--muted); margin-bottom: 0; }
-.page-header--split { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+/* The trailing action must drop below the title rather than out of the
+   viewport at 320 CSS px (§18 reflow). An explicit basis on the text block is
+   what makes that happen only when it is needed: with `flex-basis: auto` the
+   paragraph's max-content width would push the action onto its own line at
+   every width. */
+.page-header--split { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.page-header--split > :first-child { flex: 1 1 15rem; min-width: 0; }
 .back-link { display: inline-flex; min-height: 44px; align-items: center; margin-bottom: 0.45rem; font-size: 0.875rem; font-weight: 750; text-decoration: none; }
 .section-block { margin-top: 2.5rem; }
 .section-heading { min-height: 44px; margin-bottom: 0.65rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--line); }

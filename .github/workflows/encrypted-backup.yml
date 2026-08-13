@@ -22,12 +22,17 @@ jobs:
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       AGE_BACKUP_RECIPIENT: ${{ secrets.AGE_BACKUP_RECIPIENT }}
       BACKUP_WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-      BACKUP_DIR: ${{ runner.temp }}/gtt-encrypted-backup
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      # The `runner` context does not exist in a job-level `env:` — only inside
+      # steps — and referencing it there makes GitHub reject the whole file, so
+      # this workflow never ran at all. RUNNER_TEMP is the plain environment
+      # variable for the same directory.
+      - name: Choose the backup working directory
+        run: echo "BACKUP_DIR=$RUNNER_TEMP/gtt-encrypted-backup" >> "$GITHUB_ENV"
       - name: Install PostgreSQL client and age
         run: sudo apt-get update && sudo apt-get install --yes postgresql-client age
       - name: Record backup start
