@@ -18,3 +18,9 @@ phase4-capacity-report.json
 phase4-restore-report.json
 .capacity-*.local
 Claude Handoff/
+# Vendored agent-assistant tooling. Local developer tooling, not part of the
+# application, and three near-identical copies of it outweighed the rest of
+# the repository. Kept on disk, out of version control.
+.agents/
+.claude/
+.gemini/
