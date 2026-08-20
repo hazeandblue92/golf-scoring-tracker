@@ -13,9 +13,9 @@
   "dependencies": {
     "@gtt/contracts": "0.1.0",
     "@gtt/scoring": "0.1.0",
-    "@supabase/supabase-js": "2.112.2",
+    "@supabase/supabase-js": "2.112.3",
     "@tanstack/react-query": "5.101.4",
-    "dexie": "4.4.4",
+    "dexie": "4.4.5",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-router": "7.18.2"
