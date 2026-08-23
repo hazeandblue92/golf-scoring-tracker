@@ -393,7 +393,17 @@ function matchHolesInPlayOrder(
     throw new RangeError(`match pairing references missing group '${shared[0]}'`)
   }
   if (group.start_hole_ordinal === null || holes.length < 2) return [...holes]
-  const start = holes.findIndex((hole) => hole.ordinal >= group.start_hole_ordinal!)
+  // Engine ordinals are re-based to the competition's hole scope. The group
+  // start, however, is a COURSE ordinal. Looking at `hole.ordinal` here makes
+  // a scoped back nine (engine ordinals 1..9) ignore a hole-10 shotgun start.
+  const courseOrdinalByHoleId = new Map(
+    snapshot.holes.map((hole) => [hole.id, hole.hole_ordinal]),
+  )
+  const start = holes.findIndex(
+    (hole) =>
+      (courseOrdinalByHoleId.get(hole.id) ?? hole.ordinal) >=
+        group.start_hole_ordinal!,
+  )
   if (start <= 0) return [...holes]
   return [...holes.slice(start), ...holes.slice(0, start)]
 }
@@ -779,7 +789,12 @@ export function buildProjections(
       continue
     }
     const rules = parsed.data
-    if (competition.format !== rules.format || competition.metric !== rules.metric) {
+    if (
+      competition.format !== rules.format ||
+      competition.metric !== rules.metric ||
+      competition.rules_schema_version !== rules.schemaVersion ||
+      competition.rules_schema_version !== RULES_SCHEMA_VERSION
+    ) {
       const mismatches = [
         ...(competition.format === rules.format
           ? []
@@ -787,6 +802,18 @@ export function buildProjections(
         ...(competition.metric === rules.metric
           ? []
           : [`metric column '${competition.metric}' != rules '${rules.metric}'`]),
+        ...(competition.rules_schema_version === rules.schemaVersion
+          ? []
+          : [
+              `rules_schema_version column '${competition.rules_schema_version}' ` +
+              `!= rules '${rules.schemaVersion}'`,
+            ]),
+        ...(competition.rules_schema_version === RULES_SCHEMA_VERSION
+          ? []
+          : [
+              `rules_schema_version '${competition.rules_schema_version}' ` +
+              `is unsupported by engine schema '${RULES_SCHEMA_VERSION}'`,
+            ]),
       ]
       competitions.push({
         competitionId: competition.id,
@@ -804,24 +831,41 @@ export function buildProjections(
       continue
     }
 
-    // Every round this competition spans, in the order competition_rounds
-    // declares. A competition with no rows is event-wide (single round).
+    // Every competition must declare its exact round scope. Falling back to
+    // every event hole would let a malformed restore silently change the
+    // frozen Terms of Competition and produce a plausible but false result.
     const compRounds = snapshot.competitionRounds.filter(
       (cr) => cr.competition_id === competition.id,
     )
+    if (compRounds.length === 0) {
+      competitions.push({
+        competitionId: competition.id,
+        engineVersion: ENGINE_VERSION,
+        projectionHash: hashOf(competition.id, [], snapshot.event.scoring_revision),
+        status: 'error',
+        warnings: [{
+          code: 'RULES_INVALID',
+          message:
+            'competition has no declared competition_rounds scope; results ' +
+            'cannot fall back to event-wide holes',
+        }],
+        summary: {},
+        rows: [],
+        holeResults: [],
+      })
+      continue
+    }
     const roundIds = compRounds.map((cr) => cr.round_id)
     // Each competition_round owns its own scope. Concatenating independently
     // scoped rounds preserves published order without leaking round one's
     // front/back-nine selection into every later round.
-    const allHoles = compRounds.length > 0
-      ? compRounds.flatMap((cr) =>
-          holeSnapshots(
-            snapshot,
-            [cr.round_id],
-            cr.hole_scope ?? rules.holeScope ?? null,
-          ),
-        )
-      : holeSnapshots(snapshot, [], rules.holeScope ?? null)
+    const allHoles = compRounds.flatMap((cr) =>
+      holeSnapshots(
+        snapshot,
+        [cr.round_id],
+        cr.hole_scope ?? rules.holeScope ?? null,
+      ),
+    )
 
     // entity id lookups: engine works in entry/team ids, projections store
     // competition_entities.id.
@@ -1154,15 +1198,33 @@ export function buildProjections(
                 .map((e) => {
                   const team = snapshot.teams.find((t) => t.id === e.event_team_id)!
                   const scores = teamScoresFor(snapshot, team.id, holeIds)
+                  if (metric === 'net' && team.playing_handicap === null) {
+                    warnings.push({
+                      code: 'SKINS_NET_HANDICAP_MISSING',
+                      message:
+                        `Team '${team.id}' has no frozen Playing Handicap; ` +
+                        'its net skins values remain unresolved.',
+                    })
+                  }
                   return {
                     entityId: team.id,
                     eligible: !applyCurrentEntityStatus ||
                       toEntityStatus(team.status) === 'active',
                     holeScores: holes.map((h) => {
                       const s = scores.find((x) => x.holeId === h.id)
+                      const gross = s?.grossStrokes ?? null
+                      const score = metric === 'net'
+                        ? gross === null || team.playing_handicap === null
+                          ? null
+                          : gross - strokesReceivedOnHole(
+                              team.playing_handicap,
+                              holes.length,
+                              h.strokeIndex,
+                            )
+                        : gross
                       return {
                         holeId: h.id,
-                        score: s?.grossStrokes ?? null,
+                        score,
                         terminal: s !== undefined && s.status !== 'complete' && s.status !== 'not_started',
                       }
                     }),
@@ -1173,6 +1235,18 @@ export function buildProjections(
                 .map((e) => {
                   const entry = snapshot.entries.find((x) => x.id === e.event_entry_id)!
                   const scores = individualScoresFor(snapshot, entry.id, holeIds)
+                  const playingHandicapValue = competitionPlayingHandicap(
+                    entry,
+                    rules.handicap,
+                  )
+                  if (metric === 'net' && playingHandicapValue === null) {
+                    warnings.push({
+                      code: 'SKINS_NET_HANDICAP_MISSING',
+                      message:
+                        `Entry '${entry.id}' has no frozen Playing Handicap; ` +
+                        'its net skins values remain unresolved.',
+                    })
+                  }
                   return {
                     entityId: entry.id,
                     eligible: !applyCurrentEntityStatus ||
@@ -1180,11 +1254,10 @@ export function buildProjections(
                     holeScores: holes.map((h) => {
                       const s = scores.find((x) => x.holeId === h.id)
                       const gross = s?.grossStrokes ?? null
-                      let score: number | null = gross
-                      const playingHandicapValue = competitionPlayingHandicap(
-                        entry,
-                        rules.handicap,
-                      )
+                      let score: number | null =
+                        metric === 'net' && playingHandicapValue === null
+                          ? null
+                          : gross
                       if (score !== null && metric === 'net' && playingHandicapValue !== null) {
                         score =
                           score -
@@ -1236,6 +1309,7 @@ export function buildProjections(
           if (rules.skins.population === 'flight') {
             const keys = [...new Set(skinEntries.map((e) => skinFlightOf.get(e.entityId) ?? null))]
             if (keys.length === 1 && keys[0] === null) {
+              provisional = true
               warnings.push({
                 code: 'SKINS_FLIGHT_NOT_ASSIGNED',
                 message:
@@ -1244,6 +1318,7 @@ export function buildProjections(
               })
             } else {
               if (keys.includes(null)) {
+                provisional = true
                 warnings.push({
                   code: 'SKINS_FLIGHT_ASSIGNMENTS_INCOMPLETE',
                   message:
@@ -1257,14 +1332,75 @@ export function buildProjections(
               )
             }
           } else if (rules.skins.population === 'group') {
-            // Group pools need the pairing groups, which the scoring snapshot
-            // does not carry. Say so rather than silently running field-wide.
-            warnings.push({
-              code: 'SKINS_GROUP_POPULATION_UNSUPPORTED',
-              message:
-                'Skins population "group" is not supported; the pool ran across ' +
-                'the whole field. Use field, flight, or teams.',
-            })
+            const roundIdsForHoles = new Set(
+              snapshot.holes
+                .filter((hole) => holeIds.has(hole.id))
+                .map((hole) => hole.round_id),
+            )
+            const eligibleGroupIds = new Set(
+              snapshot.groups
+                .filter((group) => roundIdsForHoles.has(group.round_id))
+                .map((group) => group.id),
+            )
+            const groupIdsByEntry = new Map<string, string[]>()
+            for (const member of snapshot.groupMembers) {
+              if (!eligibleGroupIds.has(member.group_id)) continue
+              // A frozen tee group may store its four individuals directly or
+              // store the two event teams that make up the group. Group skins
+              // are an individual population, so expand team membership here
+              // without changing the authoritative group facts.
+              const memberEntryIds = member.event_entry_id
+                ? [member.event_entry_id]
+                : member.event_team_id
+                  ? snapshot.teamMembers
+                      .filter((teamMember) =>
+                        teamMember.event_team_id === member.event_team_id
+                      )
+                      .map((teamMember) => teamMember.event_entry_id)
+                  : []
+              for (const entryId of memberEntryIds) {
+                const existing = groupIdsByEntry.get(entryId) ?? []
+                groupIdsByEntry.set(entryId, [...existing, member.group_id])
+              }
+            }
+            for (const entry of skinEntries) {
+              const memberships = [...new Set(groupIdsByEntry.get(entry.entityId) ?? [])]
+                .sort(compareText)
+              if (memberships.length > 1) {
+                throw new RangeError(
+                  `skins entry '${entry.entityId}' belongs to multiple groups ` +
+                    `for the same competition round: ${memberships.join(', ')}`,
+                )
+              }
+            }
+            const keys = [...new Set(
+              skinEntries.map((entry) => groupIdsByEntry.get(entry.entityId)?.[0] ?? null),
+            )]
+            if (keys.length === 1 && keys[0] === null) {
+              provisional = true
+              warnings.push({
+                code: 'SKINS_GROUP_NOT_ASSIGNED',
+                message:
+                  'Skins population is per group but no entrant has a frozen ' +
+                  'group assignment; the whole field shares one fallback pool.',
+              })
+            } else {
+              if (keys.includes(null)) {
+                provisional = true
+                warnings.push({
+                  code: 'SKINS_GROUP_ASSIGNMENTS_INCOMPLETE',
+                  message:
+                    'Some skins entrants have no group assignment. They are kept ' +
+                    'in an explicit unassigned fallback pool so they do not affect ' +
+                    'a named group carry.',
+                })
+              }
+              pools = keys.map((key) =>
+                skinEntries.filter(
+                  (entry) => (groupIdsByEntry.get(entry.entityId)?.[0] ?? null) === key,
+                ),
+              )
+            }
           }
 
           for (const pool of pools) {
@@ -1279,7 +1415,7 @@ export function buildProjections(
             warnings.push(
               ...result.warnings.map((w) => ({ code: w.code, message: w.message })),
             )
-            const poolRows = result.totals.map((t) => ({
+            const poolRows: ProjectionRow[] = result.totals.map((t) => ({
               entityId: lookup.get(t.entityId) ?? t.entityId,
               rank: null,
               isTied: false,
@@ -1393,6 +1529,7 @@ export function buildProjections(
                 'No match pairings exist for this competition; publish creates ' +
                 'them before scoring can produce standings.',
             })
+            provisional = true
           }
 
           const allowance = rational(
@@ -1417,8 +1554,64 @@ export function buildProjections(
               ? entityById.get(pairing.side_b_entity_id)
               : undefined
             if (!a || !b) {
-              // A bye or an unfilled bracket slot: nothing to compute, and
-              // inventing a walkover result is the Committee's call.
+              // A one-sided bracket remains unresolved until the Committee
+              // records an explicit walkover. Once recorded, the sole present
+              // side is authoritative and receives the same deterministic
+              // match-points win as a two-sided walkover. Never infer a bye
+              // from the missing side alone.
+              const present = a ?? b
+              if (!present) {
+                provisional = true
+                warnings.push({
+                  code: 'MATCH_EMPTY_PAIRING',
+                  message: `Match '${pairing.id}' has no assigned side and remains unresolved.`,
+                })
+                continue
+              }
+              if (seenSides.has(present.id)) {
+                throw new RangeError(
+                  `round '${roundId ?? pairing.round_id}' contains more than one ` +
+                  `match for side '${present.id}'`,
+                )
+              }
+              seenSides.add(present.id)
+              const recordedWalkover = pairing.status === 'walkover' &&
+                pairing.winner_entity_id === present.id
+              if (!recordedWalkover) {
+                provisional = true
+                warnings.push({
+                  code: 'MATCH_OPEN_BRACKET_SLOT',
+                  message:
+                    `Match '${pairing.id}' has one assigned side but no ` +
+                    'authoritative walkover; the pairing remains unresolved.',
+                })
+                continue
+              }
+              rows.push({
+                entityId: present.id,
+                rank: null,
+                isTied: false,
+                thru: 0,
+                resultPrimary: usesMatchPoints ? 2 : 0,
+                resultSecondary: 0,
+                displayPrimary: 'Walkover',
+                status: 'complete',
+                detail: {
+                  matchId: pairing.id,
+                  roundId: pairing.round_id,
+                  opponentEntityId: null,
+                  matchStatus: 'won',
+                  matchPoints: 2,
+                  holesUp: 0,
+                  holesRemaining: 0,
+                  dormie: false,
+                  outcome: 'won',
+                  lifecycleStatus: 'walkover',
+                  ...(pairing.bracket_position === null
+                    ? {}
+                    : { bracketPosition: pairing.bracket_position }),
+                },
+              })
               continue
             }
 
@@ -1561,7 +1754,13 @@ export function buildProjections(
               }
             }
 
-            if (state.status === 'in_progress') provisional = true
+            const lifecycleUnfinished =
+              !['complete', 'conceded', 'walkover'].includes(pairing.status) ||
+              ((pairing.status === 'conceded' || pairing.status === 'walkover') &&
+                authoritativeWinner === null)
+            if (state.status === 'in_progress' || lifecycleUnfinished) {
+              provisional = true
+            }
 
             const sideRow = (
               entityId: string,
@@ -1593,7 +1792,7 @@ export function buildProjections(
                 resultSecondary: state.holesRemaining,
                 displayPrimary: state.display,
                 status:
-                  state.status === 'in_progress'
+                  state.status === 'in_progress' || lifecycleUnfinished
                     ? 'provisional'
                     : 'complete',
                 detail: {
@@ -1605,7 +1804,13 @@ export function buildProjections(
                   holesUp: up,
                   holesRemaining: state.holesRemaining,
                   dormie: state.dormie,
-                  outcome: won ? 'won' : lost ? 'lost' : state.status === 'halved' ? 'halved' : 'in_progress',
+                  outcome: won
+                    ? 'won'
+                    : lost
+                      ? 'lost'
+                      : state.status === 'halved'
+                        ? 'halved'
+                        : 'in_progress',
                   ...(pairing.bracket_position === null
                     ? {}
                     : { bracketPosition: pairing.bracket_position }),
@@ -1649,6 +1854,13 @@ export function buildProjections(
                 detail: { matchId: pairing.id, roundId: pairing.round_id },
               })
             }
+          }
+
+          const unpairedEntities = scoringEntities.filter(
+            (entity) => !seenSides.has(entity.id),
+          )
+          if (unpairedEntities.length > 0) {
+            provisional = true
           }
           break
         }
@@ -1888,14 +2100,34 @@ export function buildProjections(
           },
         }))
       } else {
+        const roundIdsForHoles = [...new Set(
+          snapshot.holes
+            .filter((hole) => allHoles.some((scoped) => scoped.id === hole.id))
+            .map((hole) => hole.round_id),
+        )]
+        const singleRoundContext = compRounds.length === 1
+          ? compRounds[0]?.round_id ?? null
+          : roundIdsForHoles.length === 1
+            ? roundIdsForHoles[0] ?? null
+            : null
         const single = computeForHoles(
           allHoles,
-          compRounds.length === 1 ? compRounds[0]?.round_id ?? null : null,
+          singleRoundContext,
         )
         rows = single.rows.map((row) => ({
           ...row,
           entityId: slotOf(row.entityId),
         }))
+        const seenSlots = new Set<string>()
+        for (const row of rows) {
+          if (seenSlots.has(row.entityId)) {
+            throw new RangeError(
+              `single-round substitution slot '${row.entityId}' has multiple ` +
+              'effective scoring holders',
+            )
+          }
+          seenSlots.add(row.entityId)
+        }
         holeResults = single.holeResults
         provisional = single.provisional
       }

@@ -80,6 +80,12 @@ schema version the operations screen compares against the release.
    `docs/season-launch-checklist.md`. The `verify` job's output is the
    deployed-header evidence AC-SEC-003 asks for.
 
+6. **Bootstrap the first owner on a new project.** After the first successful
+   migration/function deployment only, follow
+   [initial-owner-bootstrap.md](initial-owner-bootstrap.md). The guarded
+   command closes permanently after the first owner grant and is never part of
+   an ordinary release.
+
 ## Verifying by hand
 
 ```bash

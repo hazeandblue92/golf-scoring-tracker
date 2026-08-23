@@ -14,6 +14,7 @@ import {
   newCorrelationId,
   readJsonBody,
   rejected,
+  requireMfa,
   requireUser,
   serviceClient,
 } from '../_shared/http.ts'
@@ -29,6 +30,8 @@ Deno.serve(async (req: Request) => {
 
   const caller = await requireUser(req, correlationId)
   if (caller instanceof Response) return caller
+  const mfaGate = requireMfa(caller, correlationId)
+  if (mfaGate) return mfaGate
 
   const parsed = rebuildProjectionsRequestSchema.safeParse(await readJsonBody(req))
   if (!parsed.success) {

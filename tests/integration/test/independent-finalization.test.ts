@@ -78,10 +78,11 @@ describe('independent competition finalization (Appendix B)', () => {
     status: string
     final_result_hash: string | null
     finalized_at: string | null
+    finalized_revision: number | null
   }>> {
     const { data, error } = await fx.service
       .from('competitions')
-      .select('id,status,final_result_hash,finalized_at')
+      .select('id,status,final_result_hash,finalized_at,finalized_revision')
       .eq('event_id', fx.eventId)
     if (error) throw new Error(`competitions read failed — ${error.message}`)
     return new Map(data!.map((row) => [row.id as string, row as never]))
@@ -92,6 +93,13 @@ describe('independent competition finalization (Appendix B)', () => {
       .from('events').select('status').eq('id', fx.eventId).single()
     if (error) throw new Error(`events read failed — ${error.message}`)
     return data!.status as string
+  }
+
+  async function eventRevision(): Promise<number> {
+    const { data, error } = await fx.service
+      .from('events').select('scoring_revision').eq('id', fx.eventId).single()
+    if (error) throw new Error(`event revision read failed — ${error.message}`)
+    return data!.scoring_revision as number
   }
 
   async function roundStatus(): Promise<string> {
@@ -186,6 +194,7 @@ describe('independent competition finalization (Appendix B)', () => {
     const statuses = await competitionStatuses()
     expect(statuses.get(backNineId)?.status).toBe('finalized')
     expect(statuses.get(backNineId)?.final_result_hash).toBe(sealedHash)
+    expect(statuses.get(backNineId)?.finalized_revision).toBeTypeOf('number')
 
     for (const siblingId of [
       fx.competitions.grossId,
@@ -226,6 +235,39 @@ describe('independent competition finalization (Appendix B)', () => {
     )
     expect(front.status, JSON.stringify(front.body)).toBe(200)
     expect(front.body.status).toBe('committed')
+
+    const [{ data: event }, { data: competition }] = await Promise.all([
+      fx.service.from('events')
+        .select('scoring_revision').eq('id', fx.eventId).single(),
+      fx.service.from('competitions')
+        .select('engine_version').eq('id', backNineId).single(),
+    ])
+    const laterRevision = event?.scoring_revision as number
+    const laterPublish = await fx.service.rpc('publish_projections', {
+      p_event_id: fx.eventId,
+      p_revision: laterRevision,
+      p_result: {
+        competitions: [{
+          competitionId: backNineId,
+          engineVersion: competition?.engine_version,
+          projectionHash: sealedHash,
+          status: 'final',
+          warnings: [],
+          summary: {},
+          rows: [],
+          holeResults: [],
+        }],
+      },
+    })
+    expect(laterPublish.error?.code).toBe('23514')
+
+    const { count: laterCount, error: laterReadError } = await fx.service
+      .from('competition_projections')
+      .select('competition_id', { count: 'exact', head: true })
+      .eq('competition_id', backNineId)
+      .eq('event_revision', laterRevision)
+    if (laterReadError) throw laterReadError
+    expect(laterCount).toBe(0)
 
     const back = await callFunction<SubmitScoreBody>(
       'submit-score',
@@ -278,6 +320,10 @@ describe('independent competition finalization (Appendix B)', () => {
   }, HTTP_TIMEOUT_MS)
 
   it('reopens exactly one sealed competition and restores its inputs', async () => {
+    const beforeReopen = await competitionStatuses()
+    const sealedRevision = beforeReopen.get(backNineId)?.finalized_revision
+    const revisionBeforeReopen = await eventRevision()
+    expect(sealedRevision).toBeTypeOf('number')
     const reason = 'Attested card corrected after committee review'
     const reopened = await callFunction<ReopenBody>(
       'reopen-competition',
@@ -292,7 +338,26 @@ describe('independent competition finalization (Appendix B)', () => {
     expect(statuses.get(backNineId)?.status).toBe('scoring_open')
     expect(statuses.get(backNineId)?.final_result_hash).toBeNull()
     expect(statuses.get(backNineId)?.finalized_at).toBeNull()
+    expect(statuses.get(backNineId)?.finalized_revision).toBeNull()
     expect(await eventStatus()).toBe('scoring_open')
+    expect(await eventRevision()).toBe(revisionBeforeReopen + 1)
+
+    const { data: oldArtifact, error: oldArtifactError } = await fx.service
+      .from('competition_projections')
+      .select('status,projection_hash')
+      .eq('competition_id', backNineId)
+      .eq('event_revision', sealedRevision!)
+      .single()
+    if (oldArtifactError) throw oldArtifactError
+    expect(oldArtifact).toMatchObject({ status: 'final', projection_hash: sealedHash })
+
+    const { count: reopenedRevisionArtifacts, error: reopenedArtifactError } = await fx.service
+      .from('competition_projections')
+      .select('competition_id', { count: 'exact', head: true })
+      .eq('competition_id', backNineId)
+      .eq('event_revision', revisionBeforeReopen + 1)
+    if (reopenedArtifactError) throw reopenedArtifactError
+    expect(reopenedRevisionArtifacts).toBe(0)
 
     const { data: audit, error } = await fx.service
       .from('audit_events')
@@ -322,6 +387,17 @@ describe('independent competition finalization (Appendix B)', () => {
   }, HTTP_TIMEOUT_MS)
 
   it('closes the round and the event only after every competition is sealed', async () => {
+    const unlinkedRoundId = randomUUID()
+    const extraRound = await fx.service.from('rounds').insert({
+      id: unlinkedRoundId,
+      event_id: fx.eventId,
+      round_number: 2,
+      name: 'Committee no-result round',
+      status: 'scheduled',
+      hole_count: 18,
+    })
+    if (extraRound.error) throw extraRound.error
+
     const remaining = [
       fx.competitions.grossId,
       fx.competitions.netId,
@@ -352,5 +428,10 @@ describe('independent competition finalization (Appendix B)', () => {
       expect(statuses.get(competitionId)?.final_result_hash)
         .toMatch(/^[0-9a-f]{64}$/)
     }
+
+    const { data: extraRoundStatus, error: extraRoundReadError } = await fx.service
+      .from('rounds').select('status').eq('id', unlinkedRoundId).single()
+    if (extraRoundReadError) throw extraRoundReadError
+    expect(extraRoundStatus?.status).toBe('complete')
   }, HTTP_TIMEOUT_MS)
 })

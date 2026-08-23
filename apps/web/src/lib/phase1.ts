@@ -5,6 +5,8 @@ import type {
   ReopenCompetitionRequest,
   ResolveScoreConflictRequest,
   SaveEventDraftRequest,
+  SetMatchResultRequest,
+  SetMatchResultResponse,
 } from '@gtt/contracts';
 
 import { functionUrl, getSupabaseClient, getSupabaseEnv } from './supabase.ts';
@@ -63,6 +65,9 @@ export const reopenCompetition = (body: ReopenCompetitionRequest) =>
     eventId: string;
     competitionId: string;
   }>('reopen-competition', body);
+
+export const setMatchResult = (body: SetMatchResultRequest) =>
+  invokePhase1<SetMatchResultResponse>('set-match-result', body);
 
 export const resolveScoreConflict = (body: ResolveScoreConflictRequest) =>
   invokePhase1<{ status: string }>('resolve-score-conflict', body);

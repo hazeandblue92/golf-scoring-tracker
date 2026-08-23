@@ -275,7 +275,14 @@ describe('Phase 1 launch workflow', () => {
       format: string
       integrityHash: string
       finalResultHashes: Array<{ competitionId: string; hash: string }>
-      tables: { events: unknown[]; event_holes: unknown[] }
+      tables: {
+        events: unknown[]
+        event_holes: unknown[]
+        competition_projections: Array<{
+          competition_id: string
+          projection_hash: string
+        }>
+      }
     }>('export-league', { leagueId: LEAGUE_ID, eventId }, owner.accessToken)
     expect(exported.status).toBe(200)
     expect(exported.body.format).toBe('gtt-portable-export')
@@ -286,6 +293,12 @@ describe('Phase 1 launch workflow', () => {
     })
     expect(exported.body.tables.events).toHaveLength(1)
     expect(exported.body.tables.event_holes).toHaveLength(18)
+    expect(exported.body.tables.competition_projections).toEqual([
+      expect.objectContaining({
+        competition_id: competitionId,
+        projection_hash: finalized.body.finalResultHash,
+      }),
+    ])
 
     // A visibly nonempty digest guards against an accidentally empty export.
     expect(createHash('sha256').update(JSON.stringify(exported.body.tables)).digest('hex'))

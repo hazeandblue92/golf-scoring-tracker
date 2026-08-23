@@ -24,9 +24,14 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   webServer: {
-    command: 'npm run dev --workspace apps/web -- --host 127.0.0.1 --port 4173',
+    // Exercise the shipped PWA rather than Vite's development server. The
+    // production preview installs the service worker, so offline reloads test
+    // the real precache/navigation-fallback behavior.
+    command: 'npm run build --workspace apps/web && npm run preview --workspace apps/web -- --host 127.0.0.1 --port 4173',
     url: 'http://127.0.0.1:4173/sign-in',
-    reuseExistingServer: !process.env.CI,
+    // Never reuse a developer's Vite server: that build has no production
+    // service worker and would turn the offline journey into a false failure.
+    reuseExistingServer: false,
     env: {
       VITE_SUPABASE_URL: process.env.SUPABASE_URL ?? 'http://127.0.0.1:54321',
       VITE_SUPABASE_PUBLISHABLE_KEY: publishableKey,

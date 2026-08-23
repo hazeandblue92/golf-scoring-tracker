@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useBlocker, useParams } from 'react-router';
 
@@ -37,6 +37,8 @@ export function ScoreEntry() {
   const { eventId = '' } = useParams();
   const { session } = useSession();
   const online = useOnlineStatus();
+  const queryClient = useQueryClient();
+  const queryKey = ['score-entry', eventId, session?.user.id, online] as const;
   const [holeIndex, setHoleIndex] = useState(0);
   const [values, setValues] = useState<Record<string, EditorValue>>({});
   const [dirty, setDirty] = useState<Set<string>>(new Set());
@@ -45,10 +47,25 @@ export function ScoreEntry() {
   const [saveMessage, setSaveMessage] = useState('');
 
   const query = useQuery({
-    queryKey: ['score-entry', eventId, session?.user.id],
+    queryKey,
     enabled: eventId !== '' && session !== null,
+    // This query owns an IndexedDB fallback. It must be allowed to execute
+    // while offline; TanStack's default network mode would pause it before
+    // the cache branch below can run.
+    networkMode: 'always',
     queryFn: async () => {
       const drafts = await db.scoreDrafts.where('eventId').equals(eventId).toArray();
+      const readCached = async (fallbackError: unknown): Promise<ScoreEntryData> => {
+        const snapshots = await db.eventSnapshots.where('eventId').equals(eventId).sortBy('snapshotRevision');
+        const cached = snapshots.filter((row) => row.userId === session?.user.id).at(-1);
+        if (!cached || !isScoreEntrySnapshot(cached.payload)) throw fallbackError;
+        return { ...cached.payload, drafts, dataSource: 'cache', cachedAt: cached.cachedAt };
+      };
+
+      if (!online) {
+        return readCached(new Error('No saved offline scorecard is available for this event.'));
+      }
+
       try {
         const supabase = getSupabaseClient();
         const { data: event, error } = await supabase.from('events').select('id,league_id,name,status,scoring_revision').eq('id', eventId).single();
@@ -135,10 +152,7 @@ export function ScoreEntry() {
         });
         return { ...snapshot, drafts, dataSource: 'server', cachedAt } satisfies ScoreEntryData;
       } catch (error) {
-        const snapshots = await db.eventSnapshots.where('eventId').equals(eventId).sortBy('snapshotRevision');
-        const cached = snapshots.filter((row) => row.userId === session?.user.id).at(-1);
-        if (!cached || !isScoreEntrySnapshot(cached.payload)) throw error;
-        return { ...cached.payload, drafts, dataSource: 'cache', cachedAt: cached.cachedAt } satisfies ScoreEntryData;
+        return readCached(error);
       }
     },
   });
@@ -238,9 +252,19 @@ export function ScoreEntry() {
         for (const entityId of targetIds) next.add(`${entityId}:${hole.id}`);
         return next;
       });
+      // Queueing commits each draft to IndexedDB before returning. Refresh the
+      // active query cache from that durable copy before clearing `dirty`, so
+      // the hydration effect cannot restore stale server values while offline.
+      const persistedDrafts = await db.scoreDrafts
+        .where('eventId')
+        .equals(eventId)
+        .toArray();
+      queryClient.setQueryData<ScoreEntryData>(queryKey, (current) => current
+        ? { ...current, drafts: persistedDrafts }
+        : current);
       setDirty(new Set());
       setSaveMessage('Saved on this device');
-      if (navigator.onLine) {
+      if (online) {
         const result = await syncOutbox();
         if (result.conflict > 0) setSaveMessage('Conflict needs organizer review');
         else if (result.rejected > 0) setSaveMessage('Score rejected — review event access');

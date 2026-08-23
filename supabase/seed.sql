@@ -9,7 +9,8 @@
 -- arrive with the auth Edge Function phase.
 --
 -- Fixed uuid map:
---   league                    00000000-0000-4000-8000-000000000001
+--   active league             00000000-0000-4000-8000-000000000001
+--   archived isolation league 00000000-0000-4000-8000-000000000002
 --   seasons                   ...101, ...102
 --   participants              ...201 .. ...208
 --   participant_handicaps     ...221 .. ...228
@@ -23,16 +24,27 @@
 -- League
 -- ---------------------------------------------------------------------------
 insert into public.leagues (id, name, slug, timezone, locale, privacy_notice_version, settings_json, status)
-values (
-  '00000000-0000-4000-8000-000000000001',
-  'Golf Tournament Tracker Dev League',
-  'gtt-dev',
-  'America/Detroit',
-  'en-US',
-  1,
-  '{}'::jsonb,
-  'active'
-)
+values
+  (
+    '00000000-0000-4000-8000-000000000001',
+    'Golf Tournament Tracker Dev League',
+    'gtt-dev',
+    'America/Detroit',
+    'en-US',
+    1,
+    '{}'::jsonb,
+    'active'
+  ),
+  (
+    '00000000-0000-4000-8000-000000000002',
+    'Archived Isolation Test League',
+    'gtt-isolation-test',
+    'America/Detroit',
+    'en-US',
+    1,
+    '{}'::jsonb,
+    'archived'
+  )
 on conflict (id) do nothing;
 
 -- ---------------------------------------------------------------------------

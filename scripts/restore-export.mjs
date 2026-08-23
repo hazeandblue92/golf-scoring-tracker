@@ -44,46 +44,12 @@ if (!file || !url || !serviceRoleKey) {
     const client = createClient(url, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     })
-    const order = [
-      'leagues',
-      'seasons',
-      'participants',
-      'participant_handicaps',
-      'courses',
-      'course_layouts',
-      'tee_sets',
-      'tee_holes',
-      'events',
-      'rounds',
-      'event_tee_snapshots',
-      'event_holes',
-      'flights',
-      'event_entries',
-      'event_teams',
-      'event_team_members',
-      'groups',
-      'group_members',
-      'competitions',
-      'competition_rounds',
-      'competition_entities',
-      'individual_hole_scores',
-      'team_hole_scores',
-      'score_conflicts',
-      'competition_projections',
-      'leaderboard_rows',
-      'hole_results',
-    ]
-    let restored = 0
-    for (const table of order) {
-      const rows = document.tables?.[table] ?? []
-      if (rows.length === 0) continue
-      const { error } = await client.from(table).insert(rows)
-      if (error) {
-        fail(`Restore failed at ${table}: ${error.message}`)
-        break
-      }
-      restored += rows.length
-      process.stdout.write(`Restored ${rows.length} ${table} row(s)\n`)
+    const { data: receipt, error: restoreError } = await client.rpc(
+      'restore_portable_export',
+      { p_tables: document.tables ?? {} },
+    )
+    if (restoreError) {
+      fail(`Atomic restore failed: ${restoreError.message}`)
     }
 
     if (process.exitCode !== 1) {
@@ -100,6 +66,7 @@ if (!file || !url || !serviceRoleKey) {
       }
     }
     if (process.exitCode !== 1) {
+      const restored = Number(receipt?.totalRows ?? 0)
       process.stdout.write(`Restore complete: ${restored} rows; integrity and final hashes verified.\n`)
     }
   }

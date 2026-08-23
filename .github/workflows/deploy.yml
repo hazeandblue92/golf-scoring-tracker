@@ -19,9 +19,9 @@ on:
       deployment_url:
         description: >-
           Origin to verify after deploying, e.g. https://<project>.pages.dev.
-          Leave blank to skip the live check.
+          Required for the live release-evidence check.
         type: string
-        default: ''
+        required: true
 
 permissions:
   contents: read
@@ -51,14 +51,22 @@ jobs:
           deno-version: v2.x
 
       - name: Refuse to build without public Supabase configuration
+        env:
+          DEPLOYMENT_URL: ${{ inputs.deployment_url }}
         run: |
           test -n "$VITE_SUPABASE_URL" \
             || { echo '::error::repository variable VITE_SUPABASE_URL is not set'; exit 1; }
           test -n "$VITE_SUPABASE_PUBLISHABLE_KEY" \
             || { echo '::error::repository variable VITE_SUPABASE_PUBLISHABLE_KEY is not set'; exit 1; }
+          test -n "$DEPLOYMENT_URL" \
+            || { echo '::error::deployment_url is required for live verification'; exit 1; }
           case "$VITE_SUPABASE_URL" in
             https://*) ;;
             *) echo "::error::VITE_SUPABASE_URL must be https, got $VITE_SUPABASE_URL"; exit 1 ;;
+          esac
+          case "$DEPLOYMENT_URL" in
+            https://*) ;;
+            *) echo "::error::deployment_url must be https, got $DEPLOYMENT_URL"; exit 1 ;;
           esac
 
       - name: Clean install from lockfile (§16.3)
@@ -182,21 +190,22 @@ jobs:
           node -e "
             const fs = require('fs');
             const health = JSON.parse(fs.readFileSync('health.json', 'utf8'));
-            if (health.status === 'unavailable') {
-              console.error('::error::health reports unavailable after deploy');
-              process.exit(1);
-            }
             if (health.status !== 'ok') {
-              console.warn('::warning::health reports ' + health.status);
+              console.error('::error::health must be ok after deploy, got ' + String(health.status));
+              process.exit(1);
             }
           "
 
-  # Proves the host actually serves the policy the repository declares. Skipped
-  # when no URL is supplied, because a Pages project's hostname is not derivable
-  # from anything in the repository.
+  # Proves the live host actually serves the policy the repository declares.
+  # Wait for whichever selected deployment surfaces ran, including the existing
+  # Pages origin when only Edge Functions were selected.
   verify:
-    needs: [web]
-    if: inputs.deployment_url != ''
+    needs: [gate, web, functions]
+    if: >-
+      ${{ always()
+          && needs.gate.result == 'success'
+          && (needs.web.result == 'success' || needs.web.result == 'skipped')
+          && (needs.functions.result == 'success' || needs.functions.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

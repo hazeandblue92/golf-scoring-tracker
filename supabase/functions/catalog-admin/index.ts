@@ -6,6 +6,7 @@ import {
   newCorrelationId,
   readJsonBody,
   rejected,
+  requireMfa,
   requireUser,
   serviceClient,
 } from '../_shared/http.ts'
@@ -37,6 +38,8 @@ Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') return rejected(405, 'SERVICE_UNAVAILABLE', correlationId, 'Method not allowed')
   const caller = await requireUser(req, correlationId)
   if (caller instanceof Response) return caller
+  const mfaGate = requireMfa(caller, correlationId)
+  if (mfaGate) return mfaGate
   const body = (await readJsonBody(req)) as CatalogRequest | null
   if (!body?.leagueId || !body.action) return rejected(400, 'SNAPSHOT_INVALID', correlationId, 'action and leagueId are required')
   const service = serviceClient()

@@ -1,15 +1,87 @@
 import { useEffect, useState } from 'react';
 
+export const OFFLINE_SESSION_KEY = 'gtt.networkOffline';
+export const OFFLINE_MARKER_MAX_AGE_MS = 5_000;
+
+/** Pure reconciliation rule for offline-reload markers. */
+export function offlineMarkerIsActive(
+  marker: string | null,
+  navigatorOnline: boolean,
+  now: number,
+): boolean {
+  if (!navigatorOnline) return true;
+  if (marker === null) return false;
+  const markedAt = Number(marker);
+  const age = now - markedAt;
+  return Number.isFinite(markedAt)
+    && age >= 0
+    && age < OFFLINE_MARKER_MAX_AGE_MS;
+}
+
+/**
+ * `navigator.onLine` can briefly report true during an offline document
+ * reload. Preserve the browser's explicit offline event for this tab so the
+ * new document can choose IndexedDB before attempting a network request.
+ */
+export function browserIsOffline(now = Date.now()): boolean {
+  return offlineMarkerIsActive(
+    window.sessionStorage.getItem(OFFLINE_SESSION_KEY),
+    navigator.onLine,
+    now,
+  );
+}
+
 export function useOnlineStatus() {
-  const [online, setOnline] = useState(() => navigator.onLine);
+  const [online, setOnline] = useState(() => !browserIsOffline());
 
   useEffect(() => {
-    const update = () => setOnline(navigator.onLine);
-    window.addEventListener('online', update);
-    window.addEventListener('offline', update);
+    let expiryTimer: number | undefined;
+    const clearExpiryTimer = () => {
+      if (expiryTimer !== undefined) window.clearTimeout(expiryTimer);
+      expiryTimer = undefined;
+    };
+    const markOnline = () => {
+      clearExpiryTimer();
+      window.sessionStorage.removeItem(OFFLINE_SESSION_KEY);
+      setOnline(true);
+    };
+    const markOffline = () => {
+      clearExpiryTimer();
+      window.sessionStorage.setItem(OFFLINE_SESSION_KEY, String(Date.now()));
+      setOnline(false);
+    };
+    const reconcile = () => {
+      if (!navigator.onLine) {
+        markOffline();
+        return;
+      }
+      const marker = window.sessionStorage.getItem(OFFLINE_SESSION_KEY);
+      if (!offlineMarkerIsActive(marker, true, Date.now())) {
+        markOnline();
+        return;
+      }
+      setOnline(false);
+      const markedAt = Number(marker);
+      const remaining = Math.max(0, OFFLINE_MARKER_MAX_AGE_MS - (Date.now() - markedAt));
+      expiryTimer = window.setTimeout(() => {
+        // Multiple hook instances may reconcile the same marker. Only the
+        // first timer still owning it emits the recovery event.
+        if (navigator.onLine
+          && window.sessionStorage.getItem(OFFLINE_SESSION_KEY) === marker) {
+          window.sessionStorage.removeItem(OFFLINE_SESSION_KEY);
+          setOnline(true);
+          window.dispatchEvent(new Event('online'));
+        }
+      }, remaining + 1);
+    };
+
+    window.addEventListener('online', markOnline);
+    window.addEventListener('offline', markOffline);
+    reconcile();
     return () => {
-      window.removeEventListener('online', update);
-      window.removeEventListener('offline', update);
+      clearExpiryTimer();
+      window.removeEventListener('online', markOnline);
+      window.removeEventListener('offline', markOffline);
     };
   }, []);
 

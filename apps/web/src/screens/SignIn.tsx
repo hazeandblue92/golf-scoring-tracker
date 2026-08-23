@@ -1,3 +1,12 @@
+import { useState, type FormEvent } from 'react';
+import { Navigate, useLocation, useNavigate } from 'react-router';
+
+import {
+  AccountSwitchBlockedError,
+  signInWithUsername,
+} from '../lib/auth.ts';
+import { useSession } from '../lib/session.tsx';
+
 /**
  * Sign-in screen (spec §5.2 Authentication). Form skeleton only — no
  * submission wiring beyond preventDefault; username-login flows land with
@@ -19,11 +28,25 @@ export function SignIn() {
     setSubmitting(true);
     setError(null);
     const form = new FormData(event.currentTarget);
+    const username = String(form.get('username') ?? '');
+    const password = String(form.get('password') ?? '');
     try {
-      const result = await signInWithUsername(
-        String(form.get('username') ?? ''),
-        String(form.get('password') ?? ''),
-      );
+      let result: Awaited<ReturnType<typeof signInWithUsername>>;
+      try {
+        result = await signInWithUsername(username, password);
+      } catch (cause) {
+        if (!(cause instanceof AccountSwitchBlockedError)) throw cause;
+        const confirmed = window.confirm(
+          `${cause.unsyncedCount} score${cause.unsyncedCount === 1 ? '' : 's'} from another account have not synced. Discard that local data and switch accounts?`,
+        );
+        if (!confirmed) {
+          setError('Account switch cancelled. Sign in to the previous account to sync its scores.');
+          return;
+        }
+        result = await signInWithUsername(username, password, {
+          discardPreviousUnsynced: true,
+        });
+      }
       const from = (location.state as { from?: string } | null)?.from;
       navigate(result.mustChangePassword ? '/activate' : from ?? '/dashboard', { replace: true });
     } catch (cause) {
@@ -70,8 +93,3 @@ export function SignIn() {
     </section>
   );
 }
-import { useState, type FormEvent } from 'react';
-import { Navigate, useLocation, useNavigate } from 'react-router';
-
-import { signInWithUsername } from '../lib/auth.ts';
-import { useSession } from '../lib/session.tsx';

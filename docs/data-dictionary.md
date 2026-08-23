@@ -88,15 +88,17 @@ using the service role.
 | `app_error_events` | Sanitized aggregated client/server errors; 30-day retention | `error_code`, `release`, `route_family`, `correlation_id`, `severity`, `occurrence_count`, first/last seen | Read: owner/league_admin. EF-only writes |
 | `backup_runs` | Backup workflow metadata (never the artifact) | `started_at`/`completed_at`, `workflow_run_url`, `artifact_checksum`, `artifact_size_bytes`, `status`, `last_tested_restore_on` | Read: owner/league_admin. Writes: CI/EF with service role |
 
-## Helper functions (migration 9)
+## Helper functions (migrations 9, 33, and 34)
 
 | Function | Purpose |
 | --- | --- |
 | `app.is_league_member(league)` | Active membership check for the signed-in user (SECURITY DEFINER STABLE) |
 | `app.has_role(league, roles[])` | Active role check against `role_assignments` |
 | `app.is_event_director(event)` | Event director for the event, or owner/league_admin of its league |
+| `app.actor_has_league_role(actor, league, roles[])` / `app.actor_is_event_director(actor, event)` | Service-workflow authorization predicates; require an active profile whose temporary-password activation is complete |
 | `app.can_read_event(event)` / `app.can_read_competition(competition)` | Visibility gates used by read policies (anon-safe for public events) |
 | `app.is_entry_owner(entry)` / `app.is_team_member(event_team)` | Card ownership checks |
+| `public.bootstrap_initial_owner(...)` | Service-role-only, one-time transaction that creates/attaches the initial profile, league membership, owner grant, and audit row; guarded by owner history and an advisory lock |
 | `app.can_score_entry(event, round, entry)` / `app.can_score_team(event, round, team)` | Active scorer assignment checks incl. team-to-member expansion |
 | `app.is_operator()` | Owner/league_admin anywhere; gates ops tables |
 | `public.participant_organizer_notes(participant)` | RPC returning organizer notes to organizer roles, NULL otherwise |
