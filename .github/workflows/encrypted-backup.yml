@@ -23,7 +23,7 @@ jobs:
       AGE_BACKUP_RECIPIENT: ${{ secrets.AGE_BACKUP_RECIPIENT }}
       BACKUP_WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 24
