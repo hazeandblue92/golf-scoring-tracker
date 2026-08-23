@@ -12,14 +12,22 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router';
 import type { Session } from '@supabase/supabase-js';
 
+import {
+  handleAutomaticSignOut,
+  noteLocalDataOwner,
+  prepareLocalDataForAccount,
+} from './auth.ts';
+import { db } from './offline/db.ts';
 import { startOutboxScheduler } from './offline/outbox.ts';
 import { getSupabaseClient } from './supabase.ts';
+import { browserIsOffline } from './useOnlineStatus.ts';
 
 export interface SessionProfile {
   mustChangePassword: boolean;
@@ -37,8 +45,18 @@ export interface SessionContextValue {
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
+const PROFILE_CACHE_KEY = 'session-profile-v1';
+
+async function readCachedProfile(userId: string): Promise<SessionProfile | null> {
+  const cached = await db.preferences.get([userId, PROFILE_CACHE_KEY]);
+  if (!isSessionProfile(cached?.value)) return null;
+  return cached.value;
+}
 
 async function fetchProfile(userId: string): Promise<SessionProfile | null> {
+  const cached = await readCachedProfile(userId);
+  if (browserIsOffline()) return cached;
+
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from('profiles')
@@ -46,13 +64,22 @@ async function fetchProfile(userId: string): Promise<SessionProfile | null> {
     .eq('id', userId)
     .single();
   if (error !== null || data === null) {
-    return null;
+    return cached;
   }
   const row = data as { must_change_password: boolean; display_name: string };
-  return {
+  const profile = {
     mustChangePassword: row.must_change_password,
     displayName: row.display_name,
-  };
+  } satisfies SessionProfile;
+  await db.preferences.put({ userId, key: PROFILE_CACHE_KEY, value: profile });
+  return profile;
+}
+
+function isSessionProfile(value: unknown): value is SessionProfile {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as Partial<SessionProfile>;
+  return typeof candidate.mustChangePassword === 'boolean'
+    && typeof candidate.displayName === 'string';
 }
 
 export function SessionProvider({ children }: { children: ReactNode }) {
@@ -60,25 +87,57 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<SessionProfile | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
+  const previousUserIdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     const supabase = getSupabaseClient();
     let cancelled = false;
+    let sessionUpdate = 0;
+
+    const applySession = (nextSession: Session | null): void => {
+      const update = ++sessionUpdate;
+      const previousUserId = previousUserIdRef.current;
+      const nextUserId = nextSession?.user.id;
+      previousUserIdRef.current = nextUserId;
+
+      if (nextSession === null || nextUserId === undefined) {
+        if (!cancelled) {
+          setSession(null);
+          setSessionLoading(false);
+        }
+        void handleAutomaticSignOut(previousUserId).catch(() => {
+          // Cleanup is retried on the next signed-out app start. Never erase
+          // retained unsynced rows merely because IndexedDB was unavailable.
+        });
+        return;
+      }
+
+      void prepareLocalDataForAccount(nextUserId).then(() => {
+        if (cancelled || update !== sessionUpdate) return;
+        noteLocalDataOwner(nextUserId);
+        setSession(nextSession);
+        setSessionLoading(false);
+      }).catch(() => {
+        // A persisted session for a different local-data owner must not expose
+        // that owner's unscoped offline rows. End it and retain those rows.
+        if (!cancelled && update === sessionUpdate) {
+          setSession(null);
+          setSessionLoading(false);
+          void supabase.auth.signOut();
+        }
+      });
+    };
 
     void supabase.auth.getSession().then(({ data }) => {
-      if (!cancelled) {
-        setSession(data.session);
-        setSessionLoading(false);
-      }
+      if (!cancelled) applySession(data.session);
     });
 
     // Per supabase-js guidance, do not await Supabase calls inside the
-    // callback; only update state here. The profile fetch runs in the
-    // effect below, keyed on the user id.
+    // callback. Ownership reconciliation runs outside its stack; the profile
+    // fetch remains in the effect below, keyed on the accepted user id.
     const { data: subscription } = supabase.auth.onAuthStateChange(
       (_event, nextSession) => {
-        setSession(nextSession);
-        setSessionLoading(false);
+        applySession(nextSession);
       },
     );
 

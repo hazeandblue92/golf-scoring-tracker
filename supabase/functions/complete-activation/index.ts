@@ -50,13 +50,23 @@ Deno.serve(async (req) => {
     return errorJson(401, 'AUTH_REQUIRED', 'Sign in to continue')
   }
 
-  const body = (await readJsonBody(req)) as { newPassword?: unknown } | null
+  const body = (await readJsonBody(req)) as {
+    newPassword?: unknown
+    privacyAccepted?: unknown
+  } | null
   const newPassword = body?.newPassword
   if (typeof newPassword !== 'string' || newPassword.length < MIN_PASSPHRASE_LENGTH) {
     return errorJson(
       400,
       'PASSWORD_TOO_SHORT',
       `Choose a passphrase of at least ${MIN_PASSPHRASE_LENGTH} characters`,
+    )
+  }
+  if (body?.privacyAccepted !== true) {
+    return errorJson(
+      400,
+      'SCORE_INVALID',
+      'Read and accept the privacy notice to activate your account',
     )
   }
 
@@ -73,7 +83,10 @@ Deno.serve(async (req) => {
   // 2) Only after success, clear the activation flag.
   const { error: flagError } = await service
     .from('profiles')
-    .update({ must_change_password: false })
+    .update({
+      must_change_password: false,
+      privacy_accepted_at: new Date().toISOString(),
+    })
     .eq('id', user.id)
   if (flagError) {
     // Safe partial failure: the new password may already work, but the user
@@ -104,5 +117,9 @@ Deno.serve(async (req) => {
     console.error('complete-activation: audit append failed', auditError.code)
   }
 
-  return json(200, { status: 'activated', mustChangePassword: false })
+  return json(200, {
+    status: 'activated',
+    mustChangePassword: false,
+    privacyAccepted: true,
+  })
 })

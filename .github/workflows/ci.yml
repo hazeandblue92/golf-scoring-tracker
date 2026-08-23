@@ -42,7 +42,7 @@ jobs:
 
   integration:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -53,10 +53,24 @@ jobs:
         run: npm ci
       - name: Start local Supabase (§16.3)
         run: npm run backend:start
+      - name: Verify atomic portable restore on a fresh target
+        run: |
+          npx supabase db reset --local --no-seed --yes
+          npm run test:restore:fresh
+      - name: Verify first owner bootstrap in a fresh project
+        run: |
+          npx supabase db reset --local --no-seed --yes
+          npm run test:bootstrap:fresh
       - name: Apply migrations and seed (§16.3)
+        run: npm run backend:seed
+      - name: Verify first owner attachment to an existing league
+        run: npm run test:bootstrap:existing
+      - name: Restore clean integration fixture after one-time bootstrap test
         run: npm run backend:seed
       - name: Database, Edge Function, and RLS integration tests (§20.1)
         run: npm run test:integration
+      - name: Restore clean browser-test fixture after integration tests
+        run: npm run backend:seed
       - name: Install supported Playwright browsers
         run: npx playwright install --with-deps chromium firefox webkit
       - name: Desktop/mobile browser and axe matrix (§18, §20.1)

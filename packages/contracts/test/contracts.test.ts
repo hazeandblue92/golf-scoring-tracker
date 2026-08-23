@@ -6,6 +6,10 @@ import {
   scoreValueSchema,
 } from '../src/api.ts'
 import { ERROR_CODES, errorCodeSchema } from '../src/errors.ts'
+import {
+  setMatchResultRequestSchema,
+  setMatchResultResponseSchema,
+} from '../src/phase1.ts'
 import { rulesJsonSchema } from '../src/rules.ts'
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
@@ -490,6 +494,90 @@ describe('submitScoreResponseSchema', () => {
     expect(
       submitScoreResponseSchema.safeParse({ ...response, retryAfter: 5 }).success,
     ).toBe(false)
+  })
+})
+
+describe('setMatchResultRequestSchema', () => {
+  const request = {
+    matchId: UUID_A,
+    status: 'complete',
+    winnerEntityId: UUID_B,
+    resultSummary: '3 & 2',
+    reason: 'Committee confirmed the completed card',
+  } as const
+
+  it('accepts a winner, a halved completion, and a reasoned walkover', () => {
+    expect(setMatchResultRequestSchema.safeParse(request).success).toBe(true)
+    expect(setMatchResultRequestSchema.safeParse({
+      ...request,
+      winnerEntityId: null,
+      resultSummary: 'Halved',
+    }).success).toBe(true)
+    expect(setMatchResultRequestSchema.safeParse({
+      ...request,
+      status: 'walkover',
+      resultSummary: 'Walkover',
+    }).success).toBe(true)
+  })
+
+  it('requires winners for concessions and walkovers', () => {
+    for (const status of ['conceded', 'walkover'] as const) {
+      expect(setMatchResultRequestSchema.safeParse({
+        ...request,
+        status,
+        winnerEntityId: null,
+      }).success).toBe(false)
+    }
+  })
+
+  it('rejects nonterminal states, empty evidence, and unknown fields', () => {
+    expect(setMatchResultRequestSchema.safeParse({
+      ...request,
+      status: 'in_progress',
+    }).success).toBe(false)
+    expect(setMatchResultRequestSchema.safeParse({
+      ...request,
+      reason: '  ',
+    }).success).toBe(false)
+    expect(setMatchResultRequestSchema.safeParse({
+      ...request,
+      force: true,
+    }).success).toBe(false)
+  })
+})
+
+describe('setMatchResultResponseSchema', () => {
+  const response = {
+    status: 'committed',
+    changed: true,
+    matchId: UUID_A,
+    eventId: UUID_B,
+    competitionId: UUID_C,
+    matchStatus: 'conceded',
+    winnerEntityId: UUID_D,
+    eventRevision: 4,
+    projectionRevision: 4,
+    correlationId: UUID_E,
+  } as const
+
+  it('accepts a published or queued strict receipt', () => {
+    expect(setMatchResultResponseSchema.safeParse(response).success).toBe(true)
+    expect(setMatchResultResponseSchema.safeParse({
+      ...response,
+      status: 'queued_projection',
+      projectionRevision: null,
+    }).success).toBe(true)
+  })
+
+  it('rejects malformed revisions and extra receipt fields', () => {
+    expect(setMatchResultResponseSchema.safeParse({
+      ...response,
+      eventRevision: -1,
+    }).success).toBe(false)
+    expect(setMatchResultResponseSchema.safeParse({
+      ...response,
+      retryAfter: 2,
+    }).success).toBe(false)
   })
 })
 

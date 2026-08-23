@@ -422,16 +422,20 @@ describe('publish_projections — deferred-stale-projection (spec §20.2, §7.2)
   }, 120_000)
 
   it('spec §10.5: event_revision_feed gains exactly one row per successful publish', async () => {
-    const countFeed = async () =>
-      (await q<number>('feed count', async () => {
-        const res = await fx.service
+    const readFeed = async () =>
+      (await q<Array<{
+        id: string
+        score_revision: number
+        projection_revision: number
+        changed_competition_ids: string[]
+      }>>('event revision feed', () =>
+        fx.service
           .from('event_revision_feed')
-          .select('*', { count: 'exact', head: true })
-          .eq('event_id', fx.eventId)
-        return { data: res.count, error: res.error }
-      })) ?? -1
+          .select('id,score_revision,projection_revision,changed_competition_ids')
+          .eq('event_id', fx.eventId))) ?? []
 
-    const before = await countFeed()
+    const before = await readFeed()
+    const existingIds = new Set(before.map((row) => row.id))
 
     // Two successful publishes...
     expect((await publish(fx.eventId, 1, [
@@ -450,24 +454,22 @@ describe('publish_projections — deferred-stale-projection (spec §20.2, §7.2)
       competitionPayload(fx.competitions.grossId, { hash: 'feed-orphan', entryCount: 1 }),
     ])).status).toBe('rejected')
 
-    expect(await countFeed()).toBe(before + 2)
-
-    const newest = await q<Record<string, unknown>>('newest feed row', () =>
-      fx.service
-        .from('event_revision_feed')
-        .select('score_revision, projection_revision, changed_competition_ids')
-        .eq('event_id', fx.eventId)
-        .order('published_at', { ascending: false })
-        .order('id', { ascending: true })
-        .limit(1)
-        .single())
-
-    expect(newest?.score_revision).toBe(1)
-    expect(newest?.projection_revision).toBe(1)
-    // The feed names the competitions a subscriber must refetch.
-    expect(newest?.changed_competition_ids).toEqual([
-      fx.competitions.grossId,
-      fx.competitions.skinsId,
-    ])
+    const added = (await readFeed()).filter((row) => !existingIds.has(row.id))
+    expect(added).toHaveLength(2)
+    for (const row of added) {
+      expect(row.score_revision).toBe(1)
+      expect(row.projection_revision).toBe(1)
+    }
+    // `published_at` uses a transaction timestamp, so it is not a safe
+    // insertion-order key when a publisher waited on a lock. Compare the two
+    // new receipts by identity and assert both exact announcements instead.
+    const announcements = added
+      .map((row) => [...row.changed_competition_ids].sort())
+      .sort((a, b) => a.join(',').localeCompare(b.join(',')))
+    const expected = [
+      [fx.competitions.grossId],
+      [fx.competitions.grossId, fx.competitions.skinsId].sort(),
+    ].sort((a, b) => a.join(',').localeCompare(b.join(',')))
+    expect(announcements).toEqual(expected)
   }, 120_000)
 })

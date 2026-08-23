@@ -13,6 +13,7 @@ export function Activate() {
     const form = new FormData(event.currentTarget);
     const password = String(form.get('password') ?? '');
     const confirmation = String(form.get('confirmation') ?? '');
+    const privacyAccepted = form.get('privacyAccepted') === 'yes';
     if (password !== confirmation) {
       setError('The passphrases do not match.');
       return;
@@ -20,7 +21,7 @@ export function Activate() {
     setSubmitting(true);
     setError(null);
     try {
-      await completeActivation(password);
+      await completeActivation(password, privacyAccepted);
       await refreshProfile();
       navigate('/dashboard', { replace: true });
     } catch (cause) {
@@ -48,7 +49,7 @@ export function Activate() {
           <input id="confirm-password" name="confirmation" type="password" autoComplete="new-password" minLength={12} required />
         </div>
         <label className="check-row">
-          <input type="checkbox" required />
+          <input type="checkbox" name="privacyAccepted" value="yes" required />
           <span>I have read the <Link to="/privacy" target="_blank">privacy notice</Link>.</span>
         </label>
         <button className="button button--primary" type="submit" disabled={submitting}>

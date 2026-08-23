@@ -40,6 +40,165 @@ export interface SignInResult {
   displayName: string;
 }
 
+export interface SignInOptions {
+  /**
+   * May only be set after the UI names the retained unsynced count and the
+   * user explicitly confirms that switching accounts may discard it.
+   */
+  discardPreviousUnsynced?: boolean;
+}
+
+export const LOCAL_DATA_OWNER_KEY = 'gtt.localDataOwnerUserId';
+const LEGACY_UNATTRIBUTED_OWNER = 'legacy-unattributed-local-data';
+
+export type AccountSwitchDecision = 'reuse' | 'adopt' | 'clear' | 'block';
+
+/** Pure ownership policy for the account-switch confirmation path. */
+export function accountSwitchDecision(
+  currentOwnerUserId: string | null,
+  nextUserId: string,
+  retainedUnsyncedCount: number,
+  discardPreviousUnsynced: boolean,
+): AccountSwitchDecision {
+  if (currentOwnerUserId === nextUserId) return 'reuse';
+  if (currentOwnerUserId === null) return 'adopt';
+  if (retainedUnsyncedCount > 0 && !discardPreviousUnsynced) return 'block';
+  return 'clear';
+}
+
+export class AccountSwitchBlockedError extends Error {
+  readonly unsyncedCount: number;
+
+  constructor(retainedUnsyncedCount: number) {
+    super(`${retainedUnsyncedCount} unsynced score${retainedUnsyncedCount === 1 ? '' : 's'} belong to another account.`);
+    this.name = 'AccountSwitchBlockedError';
+    this.unsyncedCount = retainedUnsyncedCount;
+  }
+}
+
+function readLocalDataOwner(): string | null {
+  if (typeof window === 'undefined') return null;
+  return window.localStorage.getItem(LOCAL_DATA_OWNER_KEY);
+}
+
+function writeLocalDataOwner(userId: string): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(LOCAL_DATA_OWNER_KEY, userId);
+}
+
+function clearLocalDataOwner(expectedUserId?: string): void {
+  if (typeof window === 'undefined') return;
+  if (expectedUserId !== undefined && readLocalDataOwner() !== expectedUserId) return;
+  window.localStorage.removeItem(LOCAL_DATA_OWNER_KEY);
+}
+
+async function resolveLocalDataOwner(): Promise<string | null> {
+  const storedOwner = readLocalDataOwner();
+  if (storedOwner !== null) return storedOwner;
+
+  // Upgrade path for data created before the explicit owner marker existed.
+  // Snapshot/preferences rows carry user ids, so recover a single owner when
+  // possible. Unattributed outbox/draft data is locked behind confirmation.
+  const [snapshots, preferences, genericRowCounts] = await Promise.all([
+    db.eventSnapshots.toArray(),
+    db.preferences.toArray(),
+    Promise.all([
+      db.scoreDrafts.count(),
+      db.outbox.count(),
+      db.receipts.count(),
+    ]),
+  ]);
+  const candidateOwners = new Set([
+    ...snapshots.map((row) => row.userId),
+    ...preferences.map((row) => row.userId),
+  ]);
+  const recoveredOwner = candidateOwners.size === 1
+    ? [...candidateOwners][0] ?? null
+    : candidateOwners.size > 1 || genericRowCounts.some((count) => count > 0)
+      ? LEGACY_UNATTRIBUTED_OWNER
+      : null;
+  if (recoveredOwner !== null) writeLocalDataOwner(recoveredOwner);
+  return recoveredOwner;
+}
+
+/** Clear every browser store whose rows are authorized by one local session. */
+export async function clearOfflineData(): Promise<void> {
+  await db.transaction(
+    'rw',
+    db.eventSnapshots,
+    db.scoreDrafts,
+    db.outbox,
+    db.receipts,
+    db.preferences,
+    async () => {
+      await db.eventSnapshots.clear();
+      await db.scoreDrafts.clear();
+      await db.outbox.clear();
+      await db.receipts.clear();
+      await db.preferences.clear();
+    },
+  );
+}
+
+let automaticCleanupInFlight: Promise<void> = Promise.resolve();
+
+/**
+ * Prepare unscoped IndexedDB stores for a session before Supabase adopts it.
+ * A different account can never observe retained rows without an explicit
+ * discard confirmation.
+ */
+export async function prepareLocalDataForAccount(
+  nextUserId: string,
+  options?: SignInOptions,
+): Promise<void> {
+  await automaticCleanupInFlight.catch(() => undefined);
+  const currentOwnerUserId = await resolveLocalDataOwner();
+  const counts = currentOwnerUserId !== null && currentOwnerUserId !== nextUserId
+    ? await outboxCounts()
+    : null;
+  const retainedUnsyncedCount = counts === null ? 0 : unsyncedCount(counts);
+  const decision = accountSwitchDecision(
+    currentOwnerUserId,
+    nextUserId,
+    retainedUnsyncedCount,
+    options?.discardPreviousUnsynced === true,
+  );
+  if (decision === 'block') {
+    throw new AccountSwitchBlockedError(retainedUnsyncedCount);
+  }
+  if (decision === 'clear') {
+    await clearOfflineData();
+  }
+  writeLocalDataOwner(nextUserId);
+}
+
+/** Mark an already-vetted session without overwriting another account. */
+export function noteLocalDataOwner(userId: string): void {
+  const currentOwnerUserId = readLocalDataOwner();
+  if (currentOwnerUserId === null || currentOwnerUserId === userId) {
+    writeLocalDataOwner(userId);
+  }
+}
+
+/**
+ * Supabase may end a disabled/expired session without the Settings button.
+ * Clear automatically when there is no unsynced work; otherwise retain the
+ * old account marker so a future account must explicitly discard it.
+ */
+export function handleAutomaticSignOut(userId?: string): Promise<void> {
+  const cleanup = automaticCleanupInFlight.catch(() => undefined).then(async () => {
+    const currentOwnerUserId = await resolveLocalDataOwner();
+    if (currentOwnerUserId === null) return;
+    if (userId !== undefined && currentOwnerUserId !== userId) return;
+    const counts = await outboxCounts();
+    if (unsyncedCount(counts) > 0) return;
+    await clearOfflineData();
+    clearLocalDataOwner(currentOwnerUserId);
+  });
+  automaticCleanupInFlight = cleanup;
+  return cleanup;
+}
+
 interface UsernameLoginPayload {
   access_token?: string;
   refresh_token?: string;
@@ -58,6 +217,7 @@ interface UsernameLoginPayload {
 export async function signInWithUsername(
   username: string,
   password: string,
+  options?: SignInOptions,
 ): Promise<SignInResult> {
   const { publishableKey } = getSupabaseEnv();
   let response: Response;
@@ -95,6 +255,12 @@ export async function signInWithUsername(
     throw new SignInError('unavailable');
   }
 
+  const nextUserId = jwtSubject(accessToken);
+  if (nextUserId === null) {
+    throw new SignInError('unavailable');
+  }
+  await prepareLocalDataForAccount(nextUserId, options);
+
   const supabase = getSupabaseClient();
   const { error } = await supabase.auth.setSession({
     access_token: accessToken,
@@ -113,11 +279,13 @@ export async function signInWithUsername(
 
 /**
  * POST complete-activation with the current (temporary) session token
- * (§14.1). The server updates the password and clears must_change_password
- * atomically; the call is idempotent, so retrying after a partial failure
- * is safe.
+ * (§14.1). The server updates the password before clearing the activation
+ * flag; the call is idempotent, so retrying after a partial failure is safe.
  */
-export async function completeActivation(newPassword: string): Promise<void> {
+export async function completeActivation(
+  newPassword: string,
+  privacyAccepted: boolean,
+): Promise<void> {
   const supabase = getSupabaseClient();
   const { data } = await supabase.auth.getSession();
   const accessToken = data.session?.access_token;
@@ -134,7 +302,7 @@ export async function completeActivation(newPassword: string): Promise<void> {
         Authorization: `Bearer ${accessToken}`,
         apikey: publishableKey,
       },
-      body: JSON.stringify({ newPassword }),
+      body: JSON.stringify({ newPassword, privacyAccepted }),
     });
   } catch {
     throw new Error(
@@ -180,26 +348,23 @@ export async function signOut(
   const userId = data.session?.user.id;
 
   await supabase.auth.signOut();
-
-  // Clear league data on sign-out (§10.1, §14.2). League-scoped stores are
-  // cleared wholesale; preferences only for the signing-out user.
-  await db.transaction(
-    'rw',
-    db.eventSnapshots,
-    db.scoreDrafts,
-    db.outbox,
-    db.receipts,
-    db.preferences,
-    async () => {
-      await db.eventSnapshots.clear();
-      await db.scoreDrafts.clear();
-      await db.outbox.clear();
-      await db.receipts.clear();
-      if (userId !== undefined) {
-        await db.preferences.where('userId').equals(userId).delete();
-      }
-    },
-  );
+  await clearOfflineData();
+  clearLocalDataOwner(userId);
 
   return { status: 'signed-out' };
+}
+
+function jwtSubject(accessToken: string): string | null {
+  const encodedPayload = accessToken.split('.')[1];
+  if (encodedPayload === undefined) return null;
+  const base64 = encodedPayload.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+  try {
+    const payload = JSON.parse(atob(padded)) as { sub?: unknown };
+    return typeof payload.sub === 'string' && payload.sub !== ''
+      ? payload.sub
+      : null;
+  } catch {
+    return null;
+  }
 }

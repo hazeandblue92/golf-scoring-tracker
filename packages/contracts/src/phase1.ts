@@ -192,6 +192,61 @@ export type ReopenCompetitionRequest = z.infer<
   typeof reopenCompetitionRequestSchema
 >
 
+// ── Match lifecycle (§4.6, §8.6) ────────────────────────────────────
+
+/** Committee-recorded terminal states. Live hole scores remain raw facts. */
+export const terminalMatchStatusSchema = z.enum([
+  'complete',
+  'conceded',
+  'walkover',
+])
+
+export type TerminalMatchStatus = z.infer<typeof terminalMatchStatusSchema>
+
+/**
+ * Record one authoritative terminal match fact. A completed match may be
+ * halved (null winner); concessions and walkovers always name the receiving
+ * side. The database independently verifies that a winner belongs to the
+ * pairing and that the event is still mutable.
+ */
+export const setMatchResultRequestSchema = z
+  .strictObject({
+    matchId: z.uuid(),
+    status: terminalMatchStatusSchema,
+    winnerEntityId: z.uuid().nullable(),
+    resultSummary: z.string().trim().min(1).max(80),
+    reason: z.string().trim().min(3).max(500),
+  })
+  .superRefine((value, ctx) => {
+    if (
+      (value.status === 'conceded' || value.status === 'walkover') &&
+      value.winnerEntityId === null
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['winnerEntityId'],
+        message: `${value.status} requires a winner`,
+      })
+    }
+  })
+
+export type SetMatchResultRequest = z.infer<typeof setMatchResultRequestSchema>
+
+export const setMatchResultResponseSchema = z.strictObject({
+  status: z.enum(['committed', 'queued_projection']),
+  changed: z.boolean(),
+  matchId: z.uuid(),
+  eventId: z.uuid(),
+  competitionId: z.uuid(),
+  matchStatus: terminalMatchStatusSchema,
+  winnerEntityId: z.uuid().nullable(),
+  eventRevision: z.number().int().min(0),
+  projectionRevision: z.number().int().min(0).nullable(),
+  correlationId: z.uuid(),
+})
+
+export type SetMatchResultResponse = z.infer<typeof setMatchResultResponseSchema>
+
 export const exportLeagueRequestSchema = z.strictObject({
   leagueId: z.uuid(),
   eventId: z.uuid().optional(),

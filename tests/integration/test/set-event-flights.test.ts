@@ -462,6 +462,30 @@ describe('set_event_flights (§5.2)', () => {
       .skins?.population).toBe('field')
   })
 
+  it('preserves an explicitly frozen group skins population while flights change', async () => {
+    const current = await draft.service.from('competitions')
+      .select('rules_json')
+      .eq('id', draftSkinsCompetitionId)
+      .single()
+    if (current.error) throw current.error
+    const rules = structuredClone(current.data.rules_json) as {
+      skins: { population: string }
+    }
+    rules.skins.population = 'group'
+    const frozen = await draft.service.from('competitions')
+      .update({ rules_json: rules })
+      .eq('id', draftSkinsCompetitionId)
+    if (frozen.error) throw frozen.error
+
+    await saveValidFlights()
+    const state = await currentState()
+    const draftSkins = state.competitions?.find((competition) =>
+      competition.id === draftSkinsCompetitionId)
+    expect((draftSkins?.rules_json as { skins?: { population?: string } })
+      .skins?.population).toBe('group')
+    expect((draftSkins?.rules_json as { flighting?: string }).flighting).toBe('per_flight')
+  })
+
   it('rejects a caller with no organizer role', async () => {
     const before = await currentState()
     const { data, error } = await userClient(draft.outsider.accessToken).rpc(

@@ -126,6 +126,7 @@ export async function createAccount(
     mustChangePassword?: boolean
     displayName?: string
     withMfa?: boolean
+    privacyAccepted?: boolean
   } = {},
 ): Promise<TestAccount> {
   const suffix = randomUUID().slice(0, 8)
@@ -155,7 +156,9 @@ export async function createAccount(
         display_name: displayName,
         status: 'active',
         must_change_password: opts.mustChangePassword ?? false,
-        privacy_accepted_at: new Date().toISOString(),
+        privacy_accepted_at: opts.privacyAccepted === false
+          ? null
+          : new Date().toISOString(),
       })
       .select('id')
       .single(),

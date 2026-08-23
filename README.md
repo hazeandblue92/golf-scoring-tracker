@@ -15,6 +15,7 @@ recorded in [PRODUCT.md](PRODUCT.md).
 npm ci                 # install from lockfile
 npm run backend:start  # local Supabase (requires Supabase CLI + container runtime)
 npm run backend:seed   # reset DB, apply migrations + seed
+npm run bootstrap:owner -- --help  # one-time first owner (see runbook)
 npm run web:start      # Vite dev server for apps/web
 npm test               # unit + property + golden vector suites
 npm run build          # production web-app build
@@ -25,6 +26,10 @@ npm run test:security        # verify CSP/headers and scan bundles/source/artifa
 npm run test:licenses        # enforce the reviewed dependency license list
 npm run verify:deployment -- https://<host>   # check a deployed origin's headers and caching
 ```
+
+For the first account on a fresh local or hosted project, follow the guarded
+[initial owner bootstrap runbook](docs/runbooks/initial-owner-bootstrap.md).
+Do not improvise an owner row or place a service-role key in command history.
 
 ## Repository layout (spec §13.4)
 

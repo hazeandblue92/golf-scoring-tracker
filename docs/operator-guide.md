@@ -2,6 +2,11 @@
 
 ## Before the season
 
+On a brand-new deployment, follow the
+[initial owner bootstrap](runbooks/initial-owner-bootstrap.md) once, complete
+password/privacy activation, and enroll the owner in MFA before creating any
+other accounts.
+
 Complete one clean restore drill, enroll every director in MFA, print the paper
 fallback pack, and record the supported-device checks. Add the four backup
 secrets listed in `docs/runbooks/backup-and-restore.md`; the private age key

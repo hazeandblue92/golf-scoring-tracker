@@ -117,10 +117,11 @@ Deno.serve(async (req) => {
   }
   const { data: callerProfile, error: callerProfileError } = await service
     .from('profiles')
-    .select('status')
+    .select('status,must_change_password')
     .eq('id', caller.id)
     .maybeSingle()
-  if (callerProfileError || callerProfile?.status !== 'active') {
+  if (callerProfileError || callerProfile?.status !== 'active' ||
+    callerProfile.must_change_password === true) {
     return errorJson(401, 'AUTH_REQUIRED', 'Sign in to continue')
   }
 

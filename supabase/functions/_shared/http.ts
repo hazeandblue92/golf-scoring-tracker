@@ -103,6 +103,14 @@ export async function requireUser(
   if (profileError || !profile || profile.status !== 'active') {
     return rejected(401, 'AUTH_REQUIRED', correlationId, 'inactive session')
   }
+  if (profile.must_change_password) {
+    return rejected(
+      401,
+      'AUTH_REQUIRED',
+      correlationId,
+      'password change required',
+    )
+  }
   return {
     client: context.supabase as SupabaseClient,
     userId: context.userClaims.id,
