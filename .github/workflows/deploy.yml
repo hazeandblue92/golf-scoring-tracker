@@ -98,7 +98,7 @@ jobs:
       # Upload the built bytes so the deploy job ships exactly what passed,
       # rather than a second build that merely came from the same source.
       - name: Retain the verified bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: web-dist
           path: apps/web/dist

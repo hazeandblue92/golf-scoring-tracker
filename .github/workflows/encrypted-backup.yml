@@ -59,7 +59,7 @@ jobs:
           echo "checksum=$checksum" >> "$GITHUB_OUTPUT"
           echo "size=$size" >> "$GITHUB_OUTPUT"
       - name: Upload encrypted artifact and evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: encrypted-database-backup-${{ github.run_id }}
           path: |
