@@ -629,6 +629,11 @@ test('organizer creates, publishes, scores, finalizes, reopens, and exports a gr
     });
     await page.reload();
   } else {
+    // Simulate a long offline session. The pagehide handoff must refresh this
+    // stale marker before the next document reconciles mobile connectivity.
+    await page.evaluate(() => {
+      window.sessionStorage.setItem('gtt.networkOffline', String(Date.now() - 60_000));
+    });
     await page.reload();
   }
   await expect(page.getByText(/Offline copy from/)).toBeVisible();

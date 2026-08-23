@@ -14,6 +14,7 @@ import {
 import {
   OFFLINE_MARKER_MAX_AGE_MS,
   offlineMarkerIsActive,
+  refreshOfflineMarkerOnPageExit,
 } from '../src/lib/useOnlineStatus.ts';
 
 describe('multi-round match standings', () => {
@@ -128,6 +129,20 @@ describe('offline reload marker', () => {
     )).toBe(false);
     expect(offlineMarkerIsActive('1', true, now)).toBe(false);
     expect(offlineMarkerIsActive(null, false, now)).toBe(true);
+  });
+
+  it('refreshes the marker on page exit only when the document is offline', () => {
+    const writes: Array<[string, string]> = [];
+    const storage = {
+      setItem(key: string, value: string) {
+        writes.push([key, value]);
+      },
+    };
+
+    refreshOfflineMarkerOnPageExit(false, storage, 100_000);
+    refreshOfflineMarkerOnPageExit(true, storage, 200_000);
+
+    expect(writes).toEqual([['gtt.networkOffline', '100000']]);
   });
 });
 

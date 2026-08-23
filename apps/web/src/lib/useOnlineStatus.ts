@@ -18,6 +18,16 @@ export function offlineMarkerIsActive(
     && age < OFFLINE_MARKER_MAX_AGE_MS;
 }
 
+/** Refresh the handoff marker only when the departing document is offline. */
+export function refreshOfflineMarkerOnPageExit(
+  navigatorOnline: boolean,
+  storage: Pick<Storage, 'setItem'>,
+  now: number,
+): void {
+  if (navigatorOnline) return;
+  storage.setItem(OFFLINE_SESSION_KEY, String(now));
+}
+
 /**
  * `navigator.onLine` can briefly report true during an offline document
  * reload. Preserve the browser's explicit offline event for this tab so the
@@ -74,14 +84,23 @@ export function useOnlineStatus() {
         }
       }, remaining + 1);
     };
+    const refreshOfflineMarker = () => {
+      refreshOfflineMarkerOnPageExit(
+        navigator.onLine,
+        window.sessionStorage,
+        Date.now(),
+      );
+    };
 
     window.addEventListener('online', markOnline);
     window.addEventListener('offline', markOffline);
+    window.addEventListener('pagehide', refreshOfflineMarker);
     reconcile();
     return () => {
       clearExpiryTimer();
       window.removeEventListener('online', markOnline);
       window.removeEventListener('offline', markOffline);
+      window.removeEventListener('pagehide', refreshOfflineMarker);
     };
   }, []);
 
