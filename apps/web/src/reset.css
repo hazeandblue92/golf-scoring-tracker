@@ -305,6 +305,8 @@ small { color: var(--muted); }
 .operations-ledger article, .error-ledger article { min-width: 0; flex-wrap: wrap; }
 .operations-ledger article { min-height: 76px; padding: 0.7rem 0; display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--line); }
 .operations-ledger article > div { min-width: 0; display: grid; gap: 0.2rem; }
+.operations-ledger article > div:first-child { flex: 1 1 12rem; }
+.operations-ledger article > div:first-child > strong, .operations-ledger article > div:first-child > span { min-width: 0; overflow-wrap: anywhere; }
 .operations-ledger article > div:last-child { flex: 0 0 auto; grid-template-columns: auto auto; align-items: center; gap: 0.75rem; }
 .operations-ledger article span { color: var(--muted); font-size: 0.8rem; text-transform: capitalize; }
 .quota-list { margin: 0; }
@@ -389,10 +391,12 @@ small { color: var(--muted); }
 .audit-list time { color: var(--muted); font-size: 0.75rem; line-height: 1.5; }
 .audit-list article div { display: grid; align-content: start; gap: 0.2rem; }
 .audit-list article span { color: var(--muted); font-size: 0.82rem; }
-.export-list { display: grid; }
-.export-list > div { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--line); }
-.export-list > div > div { display: grid; gap: 0.15rem; }
+.export-list { display: grid; grid-template-columns: minmax(0, 1fr); }
+.export-list > div { min-width: 0; min-height: 68px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem 1rem; border-bottom: 1px solid var(--line); }
+.export-list > div > div { min-width: 0; flex: 1 1 12rem; display: grid; gap: 0.15rem; }
+.export-list strong, .export-list span { overflow-wrap: anywhere; }
 .export-list span { color: var(--muted); font-size: 0.8rem; text-transform: capitalize; }
+.export-list .button { max-width: 100%; flex: 0 1 auto; white-space: normal; }
 
 .league-directory, .settings-links { display: grid; }
 .league-directory a, .settings-links a { min-height: 82px; padding: 0.8rem 0; display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: var(--ink); border-bottom: 1px solid var(--line); text-decoration: none; }

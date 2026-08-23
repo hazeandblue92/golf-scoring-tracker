@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 
 import {
@@ -76,6 +76,17 @@ async function expectNarrowReflow(page: Page) {
   });
   expect(overflow.rootScrollLeft, JSON.stringify(overflow)).toBe(0);
   expect(overflow.offenders, JSON.stringify(overflow)).toEqual([]);
+}
+
+async function uncheckAll(checkboxes: Locator) {
+  await checkboxes.evaluateAll((elements) => {
+    for (const element of elements) {
+      if (element instanceof HTMLInputElement && element.checked) element.click();
+    }
+  });
+  await expect.poll(() => checkboxes.evaluateAll((elements) =>
+    elements.filter((element) => element instanceof HTMLInputElement && element.checked).length,
+  )).toBe(0);
 }
 
 async function readOutbox(page: Page) {
@@ -559,7 +570,7 @@ test('organizer creates, publishes, scores, finalizes, reopens, and exports a gr
   await page.getByLabel('Event name').fill('E2E Gross Championship');
   await page.getByLabel('Competition preset').selectOption('individual_gross');
   const fieldPlayers = page.getByRole('group', { name: 'Event field' }).getByRole('checkbox');
-  for (const checkbox of await fieldPlayers.all()) await checkbox.uncheck();
+  await uncheckAll(fieldPlayers);
   await fieldPlayers.first().check();
   await page.getByRole('button', { name: 'Save draft' }).click();
   await expect(page.getByText('Draft saved. Server preflight passed and the event is ready to publish.')).toBeVisible();
@@ -679,9 +690,10 @@ test('organizer publishes the two-person preset and moves between shared-score r
   await page.getByRole('link', { name: 'Create event' }).click();
   await page.getByLabel('Event name').fill('E2E Two-Person Throwdown');
   await expect(page.getByLabel('Competition preset')).toHaveValue('two_person_throwdown');
-  const fieldPlayers = page.getByRole('group', { name: 'Event field' }).getByRole('checkbox');
-  for (const checkbox of await fieldPlayers.all()) await checkbox.uncheck();
-  for (const player of PHASE_2_PLAYERS) await page.getByRole('checkbox', { name: new RegExp(player) }).check();
+  const eventField = page.getByRole('group', { name: 'Event field' });
+  const fieldPlayers = eventField.getByRole('checkbox');
+  await uncheckAll(fieldPlayers);
+  for (const player of PHASE_2_PLAYERS) await eventField.getByRole('checkbox', { name: new RegExp(player) }).check();
   await expect(page.getByText('2 teams')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Handicap review' })).toBeVisible();
   await expect(page.getByRole('table').getByRole('row')).toHaveCount(5);
@@ -750,10 +762,11 @@ test('organizer publishes a four-player scramble and enters one team ball', asyn
   await page.getByRole('link', { name: 'Create event' }).click();
   await page.getByLabel('Event name').fill('E2E Four-Player Scramble');
   await page.getByLabel('Competition preset').selectOption('four_player_scramble');
-  const fieldPlayers = page.getByRole('group', { name: 'Event field' }).getByRole('checkbox');
-  for (const checkbox of await fieldPlayers.all()) await checkbox.uncheck();
+  const eventField = page.getByRole('group', { name: 'Event field' });
+  const fieldPlayers = eventField.getByRole('checkbox');
+  await uncheckAll(fieldPlayers);
   for (const player of PHASE_3_PLAYERS) {
-    await page.getByRole('checkbox', { name: new RegExp(player) }).check();
+    await eventField.getByRole('checkbox', { name: new RegExp(player) }).check();
   }
   await expect(page.getByText('2 teams')).toBeVisible();
   await expect(page.getByRole('heading', { name: '4-player teams' })).toBeVisible();

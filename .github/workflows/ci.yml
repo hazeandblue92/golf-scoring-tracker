@@ -69,6 +69,8 @@ jobs:
         run: npm run backend:seed
       - name: Database, Edge Function, and RLS integration tests (§20.1)
         run: npm run test:integration
+      - name: Restore clean browser-test fixture after integration tests
+        run: npm run backend:seed
       - name: Install supported Playwright browsers
         run: npx playwright install --with-deps chromium firefox webkit
       - name: Desktop/mobile browser and axe matrix (§18, §20.1)
