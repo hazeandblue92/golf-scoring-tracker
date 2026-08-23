@@ -309,6 +309,21 @@ describe('independent finalization fact-kind and hole-scope guards', () => {
     expect(sideA?.id).toBeTruthy()
     expect(sideB?.id).toBeTruthy()
 
+    // This setup bypasses the finalization Edge Function so it can exercise
+    // the restore-only guards directly. Keep the hand-built finalized record
+    // production-valid: league-wide exports must reject any finalized
+    // competition that has no matching sealed projection artifact.
+    const matchProjection = await fx.service.from('competition_projections').insert({
+      competition_id: matchCompetitionId,
+      event_revision: 0,
+      engine_version: 'test',
+      projection_hash: matchHash,
+      status: 'final',
+      warnings: [],
+      summary_json: {},
+    })
+    if (matchProjection.error) throw matchProjection.error
+
     const matchClosed = await fx.service.from('competitions')
       .update({ status: 'scoring_closed' }).eq('id', matchCompetitionId)
     if (matchClosed.error) throw matchClosed.error
