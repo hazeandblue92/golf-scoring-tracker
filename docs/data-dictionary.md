@@ -20,7 +20,14 @@ using the service role.
 | `leagues` | League root; one active row per deployment (enforced by partial unique index) | `id`, `name`, `slug` (unique), `timezone`, `locale`, `privacy_notice_version`, `settings_json`, `status` | Read: members and admins. Update: owner/league_admin. No client insert/delete |
 | `league_memberships` | Connects a profile to league access | `league_id` + `profile_id` (unique pair), `member_status`, `joined_at`, `ended_at` | Read: own rows; league admins. EF-only writes |
 | `role_assignments` | Additive scoped roles (section 2.2); CHECK forces event ids on event-scoped roles only | `league_id`, `event_id` (nullable), `profile_id`, `role`, `granted_by/at`, `revoked_at`; partial unique on active grants | Read: own rows; league admins; event directors for their events. EF-only writes |
-| `scoring_permissions` | Scorer assignment per event round; XOR CHECK: exactly one of participant/team target | `event_id`, `round_id`, `scorer_profile_id`, `participant_id` XOR `team_id`, `permission_type`, `valid_from/to` | Read: own assignments; directors. Insert/update: directors. No delete (expiry via `valid_to`) |
+| `scoring_permissions` | Scorer assignment per event round; XOR CHECK: exactly one of participant/team target | `event_id`, `round_id`, `scorer_profile_id`, `participant_id` XOR `team_id`, `permission_type`, `grant_origin` (`self` \| `explicit_field` \| `group_auto` \| `legacy`), `valid_from/to` | Read: own assignments; directors. Insert/update: directors. No delete (expiry via `valid_to`) |
+
+`scoring_permissions.grant_origin` records WHY a grant exists (migration 37).
+Self grants, organizer-selected field markers, and tee-group derived markers
+were previously indistinguishable, so reloading an event draft promoted the
+automatic grants into deliberate field-wide ones and widened access on each
+edit. The event builder reloads only `explicit_field`. Rows created before the
+column exists are `legacy`: unknown intent, never silently promoted.
 
 ## League catalog (section 11.3, migration 3)
 

@@ -30,9 +30,11 @@ the credential-compromise runbook.
 
 1. Use a private terminal on an owner-controlled computer. Do not run this in
    CI, a shared terminal, or a recorded screen-sharing session.
-2. Apply all database migrations through migration 34. The bootstrap RPC itself
-   is introduced in migration 33; migration 34 closes the temporary-password
-   authorization boundary for the owner it creates.
+2. Apply every database migration, not a subset. Migration 33 introduces the
+   bootstrap RPC and migration 34 closes the temporary-password authorization
+   boundary for the owner it creates, so 34 is the minimum this procedure
+   needs — it is not a stopping point, and later migrations must be applied
+   too.
 3. Deploy `username-login` and `complete-activation` before attempting the
    first sign-in.
 4. Confirm that this is a new deployment with no past owner. If an owner ever

@@ -13,6 +13,7 @@ recorded in [PRODUCT.md](PRODUCT.md).
 
 ```bash
 npm ci                 # install from lockfile
+npm run check:disk     # free-space preflight for the local stack (see runbook)
 npm run backend:start  # local Supabase (requires Supabase CLI + container runtime)
 npm run backend:seed   # reset DB, apply migrations + seed
 npm run bootstrap:owner -- --help  # one-time first owner (see runbook)
@@ -26,6 +27,11 @@ npm run test:security        # verify CSP/headers and scan bundles/source/artifa
 npm run test:licenses        # enforce the reviewed dependency license list
 npm run verify:deployment -- https://<host>   # check a deployed origin's headers and caching
 ```
+
+`backend:start` and `backend:seed` run the free-space preflight first: the
+Colima disk image grows and never shrinks, and a full host volume has taken the
+local stack down mid-session. See the
+[local stack disk runbook](docs/runbooks/local-stack-disk.md) when it fails.
 
 For the first account on a fresh local or hosted project, follow the guarded
 [initial owner bootstrap runbook](docs/runbooks/initial-owner-bootstrap.md).
