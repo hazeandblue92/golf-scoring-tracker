@@ -73,13 +73,14 @@ export function AdminEventSetup() {
       let existingTeams: TeamDraft[] = [];
       let existingFlights: FlightDraft[] = [];
       let existingScorerProfileIds: string[] = [];
+      let legacyScorerCount = 0;
       if (routeEventId !== 'new') {
         const [roundResult, entryResult, teamResult, flightResult, markerResult] = await Promise.all([
           supabase.from('rounds').select('id,source_tee_set_id').eq('event_id', routeEventId).order('round_number'),
           supabase.from('event_entries').select('participant_id,flight_id').eq('event_id', routeEventId),
           supabase.from('event_teams').select('id,name,event_team_members(position,event_entries(participant_id))').eq('event_id', routeEventId).order('created_at'),
           supabase.from('flights').select('id,name,sort_order').eq('event_id', routeEventId).order('sort_order'),
-          supabase.from('scoring_permissions').select('scorer_profile_id').eq('event_id', routeEventId).eq('permission_type', 'marker').is('valid_to', null),
+          supabase.from('scoring_permissions').select('scorer_profile_id,grant_origin').eq('event_id', routeEventId).eq('permission_type', 'marker').is('valid_to', null),
         ]);
         const setupError = roundResult.error ?? entryResult.error ?? teamResult.error ?? flightResult.error ?? markerResult.error;
         if (setupError) throw setupError;
@@ -105,12 +106,23 @@ export function AdminEventSetup() {
             .filter((entry) => entry.flight_id === flight.id)
             .map((entry) => entry.participant_id),
         }));
+        // Only grants an organizer explicitly chose for the whole field come
+        // back into the marker control. Reloading tee-group derived grants
+        // here and resaving would promote every group scorer to a field-wide
+        // marker, widening access a little more on each edit (§migration 37).
         existingScorerProfileIds = [...new Set(
-          (markerResult.data ?? []).map((permission) => permission.scorer_profile_id),
+          (markerResult.data ?? [])
+            .filter((permission) => permission.grant_origin === 'explicit_field')
+            .map((permission) => permission.scorer_profile_id),
         )];
+        legacyScorerCount = new Set(
+          (markerResult.data ?? [])
+            .filter((permission) => permission.grant_origin === 'legacy')
+            .map((permission) => permission.scorer_profile_id),
+        ).size;
       }
       const teeSets = (courses ?? []).flatMap((course) => course.course_layouts.flatMap((layout) => layout.tee_sets.filter((tee) => tee.status === 'active').map((tee) => ({ ...tee, label: `${course.name} · ${layout.name} · ${tee.name}` }))));
-      return { leagueId, league: leagues?.find((league) => league.id === leagueId), seasons: seasons ?? [], participants: participants ?? [], teeSets, existing, round, entryParticipantIds, existingTeams, existingFlights, existingScorerProfileIds };
+      return { leagueId, league: leagues?.find((league) => league.id === leagueId), seasons: seasons ?? [], participants: participants ?? [], teeSets, existing, round, entryParticipantIds, existingTeams, existingFlights, existingScorerProfileIds, legacyScorerCount };
     },
   });
 
@@ -309,12 +321,34 @@ export function AdminEventSetup() {
     if (!draftEventId || isDirty) return;
     setSubmitting(true); setError(null); setMessage(null);
     try {
-      await publishEvent({ eventId: draftEventId, openScoring: true });
-      navigate(`/events/${draftEventId}`);
+      const published = await publishEvent({ eventId: draftEventId, openScoring: true });
+      // Publishing and building the first projection are separate transactions.
+      // When the second fails the event IS published and scoring IS open, so
+      // route to the event and say results are still building — never report a
+      // publish failure for an event players can already score.
+      navigate(`/events/${draftEventId}`, published.projectionPending === true
+        ? { state: { notice: 'Event published and scoring is open. Live results are still building — reload in a moment, or rebuild them from Operations.' } }
+        : undefined);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Publish failed. Review preflight and try again.');
     } finally { setSubmitting(false); }
   }
+
+  // An event cannot be saved without a season, an active rated tee, and
+  // players. Each of those lives on a league catalog screen that is only
+  // reachable by league id, so name what is missing and link straight to it
+  // rather than presenting an empty required <select> with no way forward.
+  const prerequisites = [
+    data.seasons.length === 0
+      ? { key: 'seasons', need: 'a season', cta: 'Add a season', to: `/league/${data.leagueId}/seasons` }
+      : null,
+    data.teeSets.length === 0
+      ? { key: 'tees', need: 'a course with an active rated tee', cta: 'Add a course and tee', to: `/league/${data.leagueId}/courses` }
+      : null,
+    data.participants.length === 0
+      ? { key: 'players', need: 'active players with handicaps', cta: 'Add players', to: `/league/${data.leagueId}/players` }
+      : null,
+  ].filter((item) => item !== null);
 
   return (
     <div className="screen builder-screen">
@@ -328,6 +362,27 @@ export function AdminEventSetup() {
       </header>
       {error && <p className="form-message form-message--error" role="alert">{error}</p>}
       {message && <p className="form-message form-message--success" role="status">{message}</p>}
+      {data.legacyScorerCount > 0 && (
+        <p className="form-message form-message--warning" role="status">
+          {data.legacyScorerCount} scorer grant{data.legacyScorerCount === 1 ? '' : 's'} on this
+          draft predate origin tracking, so {data.legacyScorerCount === 1 ? 'it is' : 'they are'} not
+          pre-selected below. Re-select anyone who should mark the whole field before saving;
+          same-group marking still applies automatically and needs no selection.
+        </p>
+      )}
+      {prerequisites.length > 0 && (
+        <section className="form-message form-message--warning" role="status">
+          <p>
+            This league still needs {listPhrase(prerequisites.map((item) => item.need))} before an
+            event can be saved.
+          </p>
+          <div className="action-row">
+            {prerequisites.map((item) => (
+              <Link className="button button--secondary" key={item.key} to={item.to}>{item.cta}</Link>
+            ))}
+          </div>
+        </section>
+      )}
       <form className="builder-form" key={routeEventId} onChange={markDirty} onSubmit={(event) => void save(event)}>
         <section>
           <div className="builder-step">
@@ -336,7 +391,11 @@ export function AdminEventSetup() {
           </div>
           <div className="form-grid">
             <div className="field field--wide"><label htmlFor="event-name">Event name</label><input id="event-name" name="name" defaultValue={existing?.name ?? ''} required minLength={3} maxLength={100} /></div>
-            <div className="field"><label htmlFor="season">Season</label><select id="season" name="seasonId" defaultValue={data.seasons.find((season) => season.status === 'active')?.id ?? data.seasons[0]?.id} required>{data.seasons.map((season) => <option key={season.id} value={season.id}>{season.name}</option>)}</select></div>
+            <div className="field">
+              <label htmlFor="season">Season</label>
+              <select id="season" name="seasonId" defaultValue={data.seasons.find((season) => season.status === 'active')?.id ?? data.seasons[0]?.id} required>{data.seasons.map((season) => <option key={season.id} value={season.id}>{season.name}</option>)}</select>
+              {data.seasons.length === 0 && <small>No seasons yet. <Link to={`/league/${data.leagueId}/seasons`}>Add a season</Link> first.</small>}
+            </div>
             <div className="field"><label htmlFor="visibility">Visibility</label><select id="visibility" name="visibility" defaultValue={existing?.visibility ?? 'league'}><option value="league">League members</option><option value="public">Public</option><option value="organizers">Organizers only</option></select></div>
             <div className="field"><label htmlFor="starts-at">Starts</label><input id="starts-at" name="startsAt" type="datetime-local" value={activeStartsAt} onChange={(event) => setSelectedStartsAt(event.target.value)} required /></div>
             <div className="field"><label htmlFor="ends-at">Ends (optional)</label><input id="ends-at" name="endsAt" type="datetime-local" defaultValue={existing?.ends_at ? localDateTime(existing.ends_at) : ''} /></div>
@@ -354,6 +413,7 @@ export function AdminEventSetup() {
             <select id="tee-set" name="teeSetId" value={activeTeeSetId} onChange={(event) => setSelectedTeeSetId(event.target.value)} required>
               {data.teeSets.map((tee) => <option key={tee.id} value={tee.id}>{tee.label} · Par {tee.par} · {tee.course_rating}/{tee.slope_rating}</option>)}
             </select>
+            {data.teeSets.length === 0 && <small>No active rated tees yet. <Link to={`/league/${data.leagueId}/courses`}>Add a course and tee</Link> first.</small>}
           </div>
         </section>
 
@@ -636,6 +696,13 @@ function parseSavedFlights(value: unknown): FlightDraft[] | null {
     });
   }
   return parsed;
+}
+
+/** "a season", "a season and players", "a season, a tee, and players". */
+function listPhrase(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? '';
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(', ')}, and ${items.at(-1)}`;
 }
 
 function groupParticipants(participantIds: string[], teamSize: number): TeamDraft[] {

@@ -17,11 +17,16 @@ export function RootLayout() {
   const routeEvent = /^\/events\/([^/]+)/.exec(location.pathname)?.[1];
   const activeEventId = routeEvent ?? window.localStorage.getItem('gtt.activeEventId');
   const activeCompetitionId = window.localStorage.getItem('gtt.activeCompetitionId');
+  // The full route, not just the competition id: a skins competition lives at
+  // /skins/:id and rebuilding a /leaderboards/:id path from the id alone sent
+  // the result tab to a board that cannot render it.
+  const activeResultPath = window.localStorage.getItem('gtt.activeResultPath');
   const publicRoute = location.pathname === '/sign-in' || location.pathname === '/privacy';
   const scoreTarget = activeEventId ? `/events/${activeEventId}/score` : '/dashboard';
-  const boardTarget = activeEventId && activeCompetitionId
-    ? `/events/${activeEventId}/leaderboards/${activeCompetitionId}`
-    : '/dashboard';
+  const boardTarget = activeResultPath
+    ?? (activeEventId && activeCompetitionId
+      ? `/events/${activeEventId}/leaderboards/${activeCompetitionId}`
+      : '/dashboard');
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });

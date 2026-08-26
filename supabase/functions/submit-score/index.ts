@@ -337,10 +337,29 @@ Deno.serve(async (req: Request) => {
         ? 'queued_projection'
         : 'committed'
 
+  // A committed or duplicated write always carries authoritative revisions:
+  // the client chains its next edit off scoreRevision, and markSynced() writes
+  // it back to the local draft. Emitting a success body without them would
+  // either corrupt the draft revision or fail the client's contract parse and
+  // requeue a write that actually succeeded. Surface the invariant violation
+  // as a transient service fault instead, which retries safely because the
+  // mutation is idempotent under the same key.
+  if (
+    typeof result.score_revision !== 'number' ||
+    typeof result.event_revision !== 'number'
+  ) {
+    return rejected(
+      500,
+      'SERVICE_UNAVAILABLE',
+      correlationId,
+      'score mutation reported success without authoritative revisions',
+    )
+  }
+
   return json(200, {
     status,
-    scoreRevision: result.score_revision ?? null,
-    eventRevision: result.event_revision ?? null,
+    scoreRevision: result.score_revision,
+    eventRevision: result.event_revision,
     projectionRevision,
     errorCode: null,
     correlationId,

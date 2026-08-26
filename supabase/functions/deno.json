@@ -2,7 +2,7 @@
   "imports": {
     "zod": "npm:zod@4.4.3",
     "@supabase/supabase-js": "npm:@supabase/supabase-js@2",
-    "@gtt/scoring": "../packages/scoring/src/index.ts",
-    "@gtt/contracts": "../packages/contracts/src/index.ts"
+    "@gtt/scoring": "../../packages/scoring/src/index.ts",
+    "@gtt/contracts": "../../packages/contracts/src/index.ts"
   }
 }

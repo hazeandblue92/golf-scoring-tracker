@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link, useParams } from 'react-router';
+import { Link, useLocation, useParams } from 'react-router';
 
 import { useSession } from '../lib/session.tsx';
 import { getSupabaseClient } from '../lib/supabase.ts';
@@ -10,6 +10,10 @@ import { getSupabaseClient } from '../lib/supabase.ts';
  */
 export function EventHome() {
   const { eventId = '' } = useParams();
+  const location = useLocation();
+  // Publishing routes here with a notice when the event published but its
+  // first projection did not: scoring is open, results are still building.
+  const notice = (location.state as { notice?: string } | null)?.notice ?? null;
   const { session } = useSession();
   const viewerId = session?.user.id ?? null;
   const query = useQuery({
@@ -78,6 +82,8 @@ export function EventHome() {
         <h1>{event.name}</h1>
         <p>{new Intl.DateTimeFormat(undefined, { dateStyle: 'full', timeStyle: 'short' }).format(new Date(event.starts_at))}</p>
       </header>
+
+      {notice !== null && <p className="form-message form-message--warning" role="status">{notice}</p>}
 
       <div className="event-facts" aria-label="Event facts">
         <div><span>Course</span><strong>{snapshot?.course_name ?? 'Set at publish'}</strong></div>

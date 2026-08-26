@@ -57,8 +57,10 @@ export const TERMINAL_ERROR_CODES: readonly ErrorCode[] = [
 
 export type OutboxDecision =
   | { kind: 'synced'; serverRevision: number }
-  | { kind: 'conflict' }
-  | { kind: 'rejected'; errorCode: ErrorCode | null }
+  | { kind: 'conflict'; conflictId: string | null }
+  // A rejection the client does not recognize is still a rejection; the code
+  // is therefore a plain string rather than the ERROR_CODES enum (§10.3).
+  | { kind: 'rejected'; errorCode: string }
   | { kind: 'retry' };
 
 /**
@@ -91,11 +93,10 @@ export function decideFromResponse(
     case 'queued_projection':
       return { kind: 'synced', serverRevision: response.scoreRevision };
     case 'conflict':
-      return { kind: 'conflict' };
+      return { kind: 'conflict', conflictId: response.conflictId };
     case 'rejected':
       if (
-        response.errorCode !== null &&
-        RETRYABLE_ERROR_CODES.includes(response.errorCode)
+        (RETRYABLE_ERROR_CODES as readonly string[]).includes(response.errorCode)
       ) {
         return { kind: 'retry' };
       }
@@ -177,6 +178,34 @@ export interface ScoreMutationDraft {
   clientRecordedAt?: string;
 }
 
+/**
+ * The base revision a NEW edit of a fact must claim.
+ *
+ * `markSynced` advances the draft to the authoritative server revision as soon
+ * as a mutation commits, which can happen from a background sync between two
+ * edits of the same hole. Reading only the server snapshot in that window
+ * claims a revision the server has already moved past and manufactures a
+ * conflict out of a perfectly ordinary second edit (§10.4).
+ */
+export function nextBaseRevision(
+  serverRevision: number | undefined,
+  draftRevision: number | undefined,
+): number {
+  return Math.max(serverRevision ?? 0, draftRevision ?? 0);
+}
+
+/**
+ * The identity of the fact a mutation targets, for coalescing.
+ * Returns null for anything that is not a parseable score mutation.
+ */
+export function mutationFactKey(mutation: unknown): string | null {
+  const parsed = submitScoreRequestSchema.safeParse(mutation);
+  if (!parsed.success) return null;
+  const { eventId, target } = parsed.data;
+  const entityId = target.kind === 'individual' ? target.entryId : target.teamId;
+  return `${eventId}:${entityId}:${target.holeId}`;
+}
+
 function clientRelease(): string {
   const release = import.meta.env.VITE_RELEASE_VERSION;
   return release === undefined || release === '' ? '0.0.0' : release;
@@ -210,7 +239,9 @@ export async function enqueueScoreMutation(
       ? draft.target.entryId
       : draft.target.teamId;
 
-  await db.transaction('rw', db.scoreDrafts, db.outbox, async () => {
+  const factKey = `${draft.eventId}:${entityId}:${draft.target.holeId}`;
+
+  return db.transaction('rw', db.scoreDrafts, db.outbox, async () => {
     await db.scoreDrafts.put({
       eventId: draft.eventId,
       entityId,
@@ -220,6 +251,37 @@ export async function enqueueScoreMutation(
       baseRevision: draft.baseRevision,
       updatedAt: now,
     });
+
+    // Correcting a hole before the previous edit has left the device must not
+    // queue a second write of the same fact: the first would commit, bump the
+    // revision, and the second would land stale and open a conflict against
+    // the user's own correction. Replace the pending payload in place instead,
+    // keeping its idempotency key and its base revision — the server has seen
+    // neither, so only the latest value is ever sent (§10.3).
+    //
+    // Only 'queued' rows are safe to rewrite. A 'sending' row may already be
+    // on the wire, and reusing its key with a different payload is exactly
+    // what apply_score_mutation rejects as a replayed key with a changed
+    // payload; that case falls through to a new row, which runSync rebases
+    // from the draft before its first attempt.
+    const pending = await db.outbox.where('state').equals('queued').toArray();
+    const existing = pending.find((row) =>
+      row.eventId === draft.eventId && mutationFactKey(row.mutation) === factKey);
+
+    if (existing !== undefined) {
+      const carried = submitScoreRequestSchema.safeParse(existing.mutation);
+      await db.outbox.update(existing.idempotencyKey, {
+        mutation: {
+          ...request,
+          idempotencyKey: existing.idempotencyKey,
+          baseRevision: carried.success ? carried.data.baseRevision : draft.baseRevision,
+        } satisfies SubmitScoreRequest,
+        attempts: 0,
+        nextAttemptAt: now,
+      });
+      return existing.idempotencyKey;
+    }
+
     await db.outbox.put({
       idempotencyKey,
       eventId: draft.eventId,
@@ -228,8 +290,8 @@ export async function enqueueScoreMutation(
       attempts: 0,
       nextAttemptAt: now,
     });
+    return idempotencyKey;
   });
-  return idempotencyKey;
 }
 
 // ── Sync (§10.3) ────────────────────────────────────────────────────────────
@@ -252,6 +314,25 @@ const EMPTY_SUMMARY: SyncSummary = {
   rejected: 0,
   requeued: 0,
 };
+
+/**
+ * Return the row with its base revision lifted to the draft's, or null when
+ * nothing needs to change. The draft carries the authoritative revision as of
+ * the last commit for this fact (see `markSynced`).
+ */
+async function rebaseToDraft(row: OutboxRow): Promise<OutboxRow | null> {
+  const parsed = submitScoreRequestSchema.safeParse(row.mutation);
+  if (!parsed.success) return null;
+  const { eventId, target } = parsed.data;
+  const entityId = target.kind === 'individual' ? target.entryId : target.teamId;
+  const draft = await db.scoreDrafts.get([eventId, entityId, target.holeId]);
+  const rebased = nextBaseRevision(parsed.data.baseRevision, draft?.baseRevision);
+  if (rebased === parsed.data.baseRevision) return null;
+  return {
+    ...row,
+    mutation: { ...parsed.data, baseRevision: rebased } satisfies SubmitScoreRequest,
+  };
+}
 
 async function markSynced(row: OutboxRow, serverRevision: number): Promise<void> {
   const committedAt = Date.now();
@@ -314,6 +395,69 @@ async function sendRow(row: OutboxRow, accessToken: string): Promise<OutboxDecis
   }
 }
 
+/**
+ * Close local conflict rows an organizer has already resolved (§10.4).
+ *
+ * A conflict is terminal on the device: the mutation is never retried. But the
+ * resolution happens on the server, and nothing was reading it back — so a
+ * device that lost a conflict kept counting it as unsynced forever, warned on
+ * sign-out about it, and showed a stale local value with no way to clear it
+ * short of discarding local data.
+ *
+ * Once the server row reports 'resolved', the authoritative fact replaces the
+ * local draft and the outbox row is closed. Whatever the organizer chose
+ * (local, server, or a manual value) is what the device ends up displaying,
+ * because the fact is read back rather than assumed.
+ */
+export async function reconcileResolvedConflicts(): Promise<number> {
+  const stranded = (await db.outbox.where('state').equals('conflict').toArray())
+    .filter((row): row is OutboxRow & { conflictId: string } =>
+      typeof row.conflictId === 'string' && row.conflictId.length > 0);
+  if (stranded.length === 0) return 0;
+
+  const supabase = getSupabaseClient();
+  const { data: conflicts, error } = await supabase
+    .from('score_conflicts')
+    .select('id,event_id,event_entry_id,event_team_id,event_hole_id,status')
+    .in('id', stranded.map((row) => row.conflictId))
+    .eq('status', 'resolved');
+  if (error || !conflicts) return 0;
+
+  let reconciled = 0;
+  for (const conflict of conflicts) {
+    const row = stranded.find((candidate) => candidate.conflictId === conflict.id);
+    const entityId = conflict.event_entry_id ?? conflict.event_team_id;
+    if (row === undefined || entityId === null) continue;
+
+    const individual = conflict.event_entry_id !== null;
+    const { data: fact } = await supabase
+      .from(individual ? 'individual_hole_scores' : 'team_hole_scores')
+      .select('gross_strokes,score_status,revision')
+      .eq(individual ? 'event_entry_id' : 'event_team_id', entityId)
+      .eq('event_hole_id', conflict.event_hole_id)
+      .maybeSingle();
+
+    await db.transaction('rw', db.scoreDrafts, db.outbox, async () => {
+      if (fact !== null && fact !== undefined) {
+        await db.scoreDrafts.put({
+          eventId: conflict.event_id,
+          entityId,
+          holeId: conflict.event_hole_id,
+          value: fact.gross_strokes,
+          status: fact.score_status,
+          baseRevision: fact.revision,
+          updatedAt: Date.now(),
+        });
+      }
+      // The local mutation lost and has been superseded by an audited
+      // decision; it must stop counting as unsynced work.
+      await db.outbox.delete(row.idempotencyKey);
+    });
+    reconciled += 1;
+  }
+  return reconciled;
+}
+
 async function runSync(): Promise<SyncSummary> {
   const supabase = getSupabaseClient();
   const { data } = await supabase.auth.getSession();
@@ -323,6 +467,10 @@ async function runSync(): Promise<SyncSummary> {
     // refresh/sign-in (§17.7 "do not discard").
     return { ...EMPTY_SUMMARY };
   }
+
+  // Clear anything the organizer has already decided before draining, so a
+  // resolved conflict stops being reported as outstanding local work.
+  await reconcileResolvedConflicts().catch(() => 0);
 
   // Rows stuck in 'sending' are leftovers of a killed tab: this module is the
   // only sender and runs single-flight, so at sync start they are stale.
@@ -343,10 +491,24 @@ async function runSync(): Promise<SyncSummary> {
   const summary: SyncSummary = { ...EMPTY_SUMMARY };
   for (const row of due) {
     summary.attempted += 1;
+    // Rebase onto the authoritative revision before the FIRST attempt only.
+    // Rows queued while an earlier mutation for the same hole was in flight
+    // captured a base revision that commit has already superseded; sending it
+    // unchanged opens a conflict against the device's own prior write.
+    // Retries must stay byte-identical, because a replayed idempotency key
+    // carrying a changed payload is rejected outright (§12.5).
+    let pending = row;
+    if (row.attempts === 0) {
+      const rebased = await rebaseToDraft(row);
+      if (rebased !== null) {
+        await db.outbox.update(row.idempotencyKey, { mutation: rebased.mutation });
+        pending = rebased;
+      }
+    }
     await db.outbox.update(row.idempotencyKey, {
       state: 'sending' satisfies OutboxState,
     });
-    const decision = await sendRow(row, accessToken);
+    const decision = await sendRow(pending, accessToken);
     switch (decision.kind) {
       case 'synced':
         await markSynced(row, decision.serverRevision);
@@ -354,8 +516,11 @@ async function runSync(): Promise<SyncSummary> {
         break;
       case 'conflict':
         // Terminal until a human resolves it (§10.3, §10.4). NO auto-retry.
+        // The id is kept so reconcileResolvedConflicts can close this row once
+        // the organizer decides, rather than leaving it stranded.
         await db.outbox.update(row.idempotencyKey, {
           state: 'conflict' satisfies OutboxState,
+          conflictId: decision.conflictId,
         });
         summary.conflict += 1;
         break;

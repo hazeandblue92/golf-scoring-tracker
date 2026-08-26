@@ -71,6 +71,13 @@ export interface OutboxRow {
   attempts: number;
   /** When the next retry attempt is due (jittered exponential backoff). */
   nextAttemptAt: number;
+  /**
+   * Server conflict row this mutation lost to (§10.4). Retained so the device
+   * can tell when an organizer has resolved it and rebase the local draft onto
+   * the authoritative outcome instead of stranding a terminal conflict here
+   * forever.
+   */
+  conflictId?: string | null;
 }
 
 /** receipts: idempotencyKey PK, serverRevision, committedAt. Retained >= 7 days (§10.2). */

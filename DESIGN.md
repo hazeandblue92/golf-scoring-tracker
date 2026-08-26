@@ -154,6 +154,8 @@ The palette resembles sunlit paper, ink, and a deep green course sign. Use turf 
 
 **The State Has Words Rule.** Semantic color always travels with specific text, an icon, or a numeric state; color is never the only signal.
 
+**Sunlight mode (amended).** Scoring in direct sun is a core scenario, and the default warm-paper canvas can wash out on a phone held at arm's length on a bright green. Sunlight mode is a per-device toggle that raises contrast on the scoring surfaces: pure white canvas, near-black ink, heavier rules, and stronger borders on the stepper targets. It is a contrast adjustment, not a second theme — the palette roles, the One Turf Rule, and every semantic meaning are unchanged, and no new accent is introduced. Both modes must independently meet the 4.5:1 text requirement, and the toggle is a device preference that never travels with the account or affects any stored score.
+
 ## Typography
 
 **Display and body font:** Avenir Next when locally available, followed by Avenir, Segoe UI, and the native sans-serif stack. Do not load a remote font.
@@ -234,10 +236,19 @@ Borders are quiet but structural: inputs use a darker neutral stroke for visibil
 ### Score entry
 
 - The hole header is a dark turf slab containing a large hole number and compact Par, SI, and Yards facts.
+- Above it, a hole strip lists every hole in the round as a compact target, marking which are fully entered. It answers "where am I and what is left" without leaving the screen. Targets stay at least `44px`, the strip scrolls horizontally rather than wrapping, and it is fully keyboard operable.
 - Each scoring-entity row begins with initials, name, handicap, and server revision. Shared-ball formats make the named team the entity, label its handicap as `Team playing handicap`, and collect one team score per hole; never fabricate individual scores from a shared card. Use initials rather than avatars or uploaded photos.
+- **Strokes received on this hole are shown on the row**, as a count with dots, derived from the frozen Playing Handicap and the hole's stroke index. This is the single most consulted fact during entry — a player should never have to do the allocation arithmetic themselves. A plus player's given-back stroke reads as a negative, never as a blank.
 - The decrement, input, and increment control is a three-column unit with `54px` targets. The score input is the dominant center element; direct numeric input remains available.
+- Beneath the stepper, show the resulting net for this hole and its relation to par, updating as the value changes. It is a passive readout, **not** a live region: it must not be announced on every keystroke (§18 restrained announcements).
+- Where the event has teams, a compact strip shows each team's best gross and best net **for the current hole only**, updating as scores are entered. Label it as a live in-hole view so it is never mistaken for the authoritative leaderboard.
 - Result status is an explicit select (`Completed`, `Picked up`, `No score`, `Withdrawn`). Missing or exceptional results are never silently converted to zero.
-- The fixed footer combines progress, a polite live save message, and one unambiguous `Save hole N` action.
+- The fixed footer combines progress, a polite live save message, and the hole's save actions.
+
+**Two save actions (amended).** The footer previously carried one unambiguous `Save hole N` action. It now carries two: `Save hole N` and `Save and next`. The second is the overwhelmingly common path — a group finishes a hole and walks to the next tee — and forcing a separate navigation tap after every save was friction with no safety benefit, since both actions commit identically. `Save hole N` remains first and visually primary so the plain save is never harder to reach than the compound one.
+
+**Bulk set to par (amended).** A `Par all` control sets every entity on the hole to the hole's par in one tap. This is an explicit, visible bulk edit, never a silent default: it writes the values into the visible controls, every value stays individually editable afterwards, nothing is committed until a save action, and the change is announced once politely. The spec's prohibition is on silently converting missing or exceptional results into numbers — this is the opposite, an organizer deliberately stating a common outcome and then correcting the exceptions.
+
 - Scorecard review places Hole, Par, SI, Gross, allocated Strokes, and Net in one ruled comparison, ending in a dark-turf total band. Attestation is a separate bordered panel tied to the exact score revision; if scores change afterward, say that the prior attestation is stale and require a fresh review.
 
 ### Status, sync, and feedback

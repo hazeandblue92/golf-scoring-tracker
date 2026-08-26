@@ -13,14 +13,15 @@
     "packages/*"
   ],
   "scripts": {
-    "backend:start": "supabase start",
-    "backend:seed": "supabase db reset",
+    "backend:start": "node scripts/check-disk-space.mjs && supabase start",
+    "backend:seed": "node scripts/check-disk-space.mjs && supabase db reset",
     "web:start": "npm run dev --workspace apps/web",
     "build": "npm run build --workspace apps/web --if-present",
     "typecheck": "tsc -p packages/scoring && tsc -p packages/contracts && tsc -p packages/test-vectors",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint . --max-warnings=0",
+    "check:disk": "node scripts/check-disk-space.mjs",
     "test:integration": "vitest run --root tests/integration",
     "test:bootstrap:fresh": "vitest run --root tests/bootstrap fresh-owner.test.ts",
     "test:bootstrap:existing": "vitest run --root tests/bootstrap existing-league-owner.test.ts",

@@ -1,10 +1,12 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { Link, useParams } from 'react-router';
 
 import { getSupabaseClient } from '../lib/supabase.ts';
 
 export function Skins() {
   const { eventId = '', competitionId = '' } = useParams();
+  const queryClient = useQueryClient();
   const query = useQuery({
     queryKey: ['skins', eventId, competitionId],
     enabled: Boolean(eventId && competitionId),
@@ -48,10 +50,30 @@ export function Skins() {
     },
   });
 
+  // Skins previously relied on the 10-second poll alone. The revision feed is
+  // the same signal the Leaderboard already subscribes to; without it a skins
+  // board can sit up to ten seconds behind a committed score.
+  useEffect(() => {
+    if (!eventId) return;
+    const supabase = getSupabaseClient();
+    const channel = supabase.channel(`skins-revision-${eventId}`).on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'event_revision_feed', filter: `event_id=eq.${eventId}` },
+      () => void queryClient.invalidateQueries({ queryKey: ['skins', eventId, competitionId] }),
+    ).subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [competitionId, eventId, queryClient]);
+
   if (query.isLoading) return <div className="screen"><div className="skeleton skeleton--rows" /></div>;
   if (!query.data) return <p className="form-message form-message--error">Skins results are unavailable.</p>;
   const { event, competition, projection, outcomes, totals } = query.data;
   const lag = event.scoring_revision - (projection?.event_revision ?? 0);
+  // Skins recorded no active state at all, so the bottom-nav result tab kept
+  // pointing at whatever leaderboard was last opened — and RootLayout built a
+  // /leaderboards/ path even when the active competition was this skins game.
+  window.localStorage.setItem('gtt.activeEventId', event.id);
+  window.localStorage.setItem('gtt.activeCompetitionId', competition.id);
+  window.localStorage.setItem('gtt.activeResultPath', `/events/${eventId}/skins/${competition.id}`);
 
   return <div className="screen skins-screen">
     <header className="page-header page-header--split"><div><Link className="back-link" to={`/events/${eventId}`}>Back to {event.name}</Link><h1>{competition.name}</h1><p>{competition.rules_text}</p></div><div className="revision-badge"><span>Revision</span><strong>{projection?.event_revision ?? 0}</strong></div></header>

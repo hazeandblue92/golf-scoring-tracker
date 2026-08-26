@@ -606,7 +606,7 @@ test('organizer creates, publishes, scores, finalizes, reopens, and exports a gr
   await page.getByRole('link', { name: 'Back to E2E Gross Championship' }).click();
   await page.getByRole('link', { name: 'Enter scores' }).click();
   await expect(page.getByText(/Offline copy from/)).toBeVisible();
-  await page.getByRole('button', { name: 'Next' }).click();
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
   await page.getByRole('spinbutton').first().fill('6');
   await page.getByRole('button', { name: 'Save hole 2' }).click();
   await expect(page.getByRole('spinbutton').first()).toHaveValue('6');
@@ -640,7 +640,7 @@ test('organizer creates, publishes, scores, finalizes, reopens, and exports a gr
   // Reload starts a fresh scoring document on Hole 1. Return to the hole that
   // owns the offline draft before asserting its durable value.
   await expect(page.getByRole('heading', { name: 'Hole 1' })).toBeVisible();
-  await page.getByRole('button', { name: 'Next' }).click();
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Hole 2' })).toBeVisible();
   await expect(page.getByRole('spinbutton').first()).toHaveValue('6');
   const queuedAfterRefresh = await readOutbox(page);

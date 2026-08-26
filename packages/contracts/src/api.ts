@@ -110,13 +110,64 @@ export const submitScoreStatusSchema = z.enum([
 
 export type SubmitScoreStatus = z.infer<typeof submitScoreStatusSchema>
 
-export const submitScoreResponseSchema = z.strictObject({
-  status: submitScoreStatusSchema,
+/**
+ * Success: the raw fact is durable and the server's revisions are
+ * authoritative. The client chains its next edit off `scoreRevision`, so a
+ * success body without one is a server invariant violation, not a shape the
+ * client should tolerate — submit-score converts that case into a retryable
+ * 5xx rather than emitting a malformed 200.
+ *
+ * `duplicate` is the original receipt replayed and is success (§12.5).
+ */
+export const submitScoreSuccessSchema = z.strictObject({
+  status: z.enum(['committed', 'duplicate', 'queued_projection']),
   scoreRevision: z.number().int().min(0),
   eventRevision: z.number().int().min(0),
   projectionRevision: z.number().int().min(0).nullable(),
-  errorCode: errorCodeSchema.nullable(),
+  errorCode: z.null(),
   correlationId: z.string().min(1),
 })
 
+/**
+ * Conflict: the stored fact was NOT overwritten and a durable `score_conflicts`
+ * row exists for a human to resolve (§10.4). Revisions are nullable because
+ * the server reports what it knows about a write it deliberately refused.
+ */
+export const submitScoreConflictSchema = z.strictObject({
+  status: z.literal('conflict'),
+  scoreRevision: z.number().int().min(0).nullable(),
+  eventRevision: z.number().int().min(0).nullable(),
+  projectionRevision: z.number().int().min(0).nullable(),
+  conflictId: z.uuid().nullable(),
+  errorCode: errorCodeSchema,
+  correlationId: z.string().min(1),
+})
+
+/**
+ * Rejection: no fact was written, so revision fields are unavailable by
+ * construction rather than merely absent. Matches the shared `ErrorEnvelope`
+ * emitted by `rejected()` in supabase/functions/_shared/http.ts.
+ *
+ * `errorCode` is deliberately a plain string rather than the ERROR_CODES enum.
+ * Rejections are terminal by default (§10.3), and only the three transient
+ * codes are retried; parsing an unrecognized code as "not a rejection" would
+ * turn a terminal outcome into an infinite retry, which is the more dangerous
+ * failure. The enum remains the documented contract.
+ */
+export const submitScoreRejectionSchema = z.strictObject({
+  status: z.literal('rejected'),
+  errorCode: z.string().min(1),
+  detail: z.string().optional(),
+  correlationId: z.string().min(1),
+})
+
+export const submitScoreResponseSchema = z.discriminatedUnion('status', [
+  submitScoreSuccessSchema,
+  submitScoreConflictSchema,
+  submitScoreRejectionSchema,
+])
+
 export type SubmitScoreResponse = z.infer<typeof submitScoreResponseSchema>
+export type SubmitScoreSuccess = z.infer<typeof submitScoreSuccessSchema>
+export type SubmitScoreConflict = z.infer<typeof submitScoreConflictSchema>
+export type SubmitScoreRejection = z.infer<typeof submitScoreRejectionSchema>

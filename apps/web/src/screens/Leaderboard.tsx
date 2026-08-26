@@ -17,7 +17,7 @@ export function Leaderboard() {
       const supabase = getSupabaseClient();
       const [{ data: event, error }, { data: competition }] = await Promise.all([
         supabase.from('events').select('id,name,status,scoring_revision').eq('id', eventId).single(),
-        supabase.from('competitions').select('id,name,format,metric,status,final_result_hash,rules_text').eq('id', competitionId).single(),
+        supabase.from('competitions').select('id,name,format,metric,status,final_result_hash,rules_text,rules_json').eq('id', competitionId).single(),
       ]);
       if (error || !event || !competition) throw error ?? new Error('Leaderboard unavailable');
       const { data: flights } = await supabase.from('flights').select('id,name,sort_order').eq('event_id', eventId).order('sort_order');
@@ -32,15 +32,31 @@ export function Leaderboard() {
       const teamIds = (entities ?? []).map((entity) => entity.event_team_id).filter((id): id is string => Boolean(id));
       const [{ data: entries }, { data: teams }] = await Promise.all([
         entryIds.length ? supabase.from('event_entries').select('id,participants(display_name)').in('id', entryIds) : Promise.resolve({ data: [] }),
-        teamIds.length ? supabase.from('event_teams').select('id,name').in('id', teamIds) : Promise.resolve({ data: [] }),
+        teamIds.length ? supabase.from('event_teams').select('id,name,event_team_members(position,event_entries(id,participants(display_name)))').in('id', teamIds) : Promise.resolve({ data: [] }),
       ]);
       const entityLookup = new Map((entities ?? []).map((entity) => [entity.id, entity]));
       const entryNames = new Map((entries ?? []).map((entry) => [entry.id, relationName(entry.participants)]));
       const teamNames = new Map((teams ?? []).map((team) => [team.id, team.name]));
+      // best_k/aggregate/shamble score from MEMBER individual cards, so the
+      // attestable artifact is each member's own scorecard — not the team-ball
+      // card that /team-scorecard renders.
+      const teamMembers = new Map((teams ?? []).map((team) => [
+        team.id,
+        ((team as unknown as { event_team_members?: TeamMemberRelation[] }).event_team_members ?? [])
+          .toSorted((a, b) => (a.position ?? 0) - (b.position ?? 0))
+          .map((member) => {
+            const entry = relationValue(member.event_entries);
+            return entry === null
+              ? null
+              : { entryId: entry.id, name: relationName(relationValue(entry.participants)) };
+          })
+          .filter((member) => member !== null),
+      ]));
       return {
         event,
         competition,
         projection,
+        teamMembers,
         flights: flights ?? [],
         rows: (rows ?? []).map((row) => {
           const entity = entityLookup.get(row.entity_id);
@@ -95,12 +111,14 @@ export function Leaderboard() {
 
   if (query.isLoading) return <div className="screen"><div className="skeleton skeleton--rows" /></div>;
   if (!query.data) return <p className="form-message form-message--error">Leaderboard unavailable. The last saved scorecard remains authoritative.</p>;
-  const { event, competition, projection, rows, flights } = query.data;
+  const { event, competition, projection, rows, flights, teamMembers } = query.data;
   window.localStorage.setItem('gtt.activeEventId', event.id);
   window.localStorage.setItem('gtt.activeCompetitionId', competition.id);
+  window.localStorage.setItem('gtt.activeResultPath', `/events/${eventId}/leaderboards/${competition.id}`);
   const lag = event.scoring_revision - (projection?.event_revision ?? 0);
   const resultLabel = competition.metric === 'points' ? 'Points' : competition.metric === 'net' ? 'Net' : 'Gross';
   const entityLabel = ['best_k', 'aggregate', 'scramble', 'foursomes', 'greensomes', 'chapman', 'shamble'].includes(competition.format) ? 'Team' : 'Player';
+  const memberSourced = usesMemberCards(competition.format, competition.rules_json);
   const visibleRows = rowsForDisplay(rows, flightFilter, competition.metric, competition.format);
   const selectedFlightName = flights.find((flight) => flight.id === flightFilter)?.name;
 
@@ -142,9 +160,12 @@ export function Leaderboard() {
       <div className="leaderboard" role="table" aria-label={`${competition.name} ${selectedFlightName ?? 'overall'} standings`}>
         <div className="leaderboard-head" role="row"><span role="columnheader">Rank</span><span role="columnheader">{entityLabel}</span><span role="columnheader">Thru</span><span role="columnheader">{resultLabel}</span></div>
         {visibleRows.length === 0 ? <div className="empty-state"><h2>Waiting for the first score</h2><p>This board refreshes automatically and also polls if live updates are interrupted.</p></div> : visibleRows.map((row) => {
+          const memberCards = row.teamId && memberSourced
+            ? teamMembers.get(row.teamId) ?? []
+            : [];
           const scorecardPath = row.entryId
             ? `/events/${eventId}/scorecard/${row.entryId}`
-            : row.teamId
+            : row.teamId && memberCards.length === 0
               ? `/events/${eventId}/team-scorecard/${row.teamId}`
               : null;
           return <div className="leaderboard-row" role="row" key={row.entity_id}>
@@ -153,6 +174,13 @@ export function Leaderboard() {
               {scorecardPath
                 ? <Link className="leaderboard-name-link" to={scorecardPath}><strong>{row.name}</strong><small>{row.status}</small></Link>
                 : <><strong>{row.name}</strong><small>{row.status}</small></>}
+              {memberCards.length > 0 && (
+                <span className="member-cards">
+                  {memberCards.map((member) => (
+                    <Link key={member.entryId} to={`/events/${eventId}/scorecard/${member.entryId}`}>{member.name}</Link>
+                  ))}
+                </span>
+              )}
             </span>
             <span role="cell">{row.thru ?? '—'}</span>
             <span role="cell" className="result">{row.result_primary ?? '—'}</span>
@@ -166,6 +194,29 @@ export function Leaderboard() {
 
 function relationName(value: { display_name: string } | { display_name: string }[] | null) {
   return (Array.isArray(value) ? value[0]?.display_name : value?.display_name) ?? 'Player';
+}
+
+function relationValue<T>(value: T | T[] | null | undefined): T | null {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null;
+}
+
+interface TeamMemberRelation {
+  position: number | null;
+  event_entries:
+    | { id: string; participants: { display_name: string } | { display_name: string }[] | null }
+    | { id: string; participants: { display_name: string } | { display_name: string }[] | null }[]
+    | null;
+}
+
+/**
+ * Team formats that rank from MEMBER individual cards rather than a single
+ * shared team ball. Their attestable artifacts are the member scorecards, so
+ * the row must expose those instead of /team-scorecard.
+ */
+function usesMemberCards(format: string, rulesJson: unknown): boolean {
+  if (!['best_k', 'aggregate', 'shamble'].includes(format)) return false;
+  const source = (rulesJson as { team?: { scoreSource?: string } } | null)?.team?.scoreSource;
+  return (source ?? 'individual') === 'individual';
 }
 
 interface BoardRow {

@@ -45,10 +45,17 @@ export const saveEventDraft = (body: SaveEventDraftRequest) =>
   );
 
 export const publishEvent = (body: PublishEventRequest) =>
-  invokePhase1<{ eventId: string; status: string; snapshotHash: string }>(
-    'publish-event',
-    body,
-  );
+  invokePhase1<{
+    eventId: string;
+    status: string;
+    snapshotHash?: string;
+    /** 'pending' when the event published but its first projection did not. */
+    projectionStatus?: string;
+    projectionPending?: boolean;
+    projectionDetail?: string;
+    /** The event was already published; this call repaired projections only. */
+    replayed?: boolean;
+  }>('publish-event', body);
 
 export const finalizeCompetition = (body: FinalizeCompetitionRequest) =>
   invokePhase1<{

@@ -183,6 +183,66 @@ small { color: var(--muted); }
 .score-footer span { color: var(--muted); font-size: 0.74rem; }
 .score-footer strong { font-size: 0.78rem; }
 
+/* ── Score entry: on-course additions (DESIGN.md §Score entry) ───────────── */
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+/* Hole strip: "where am I, what is left" without leaving the screen. */
+.hole-strip { display: flex; gap: 0.35rem; padding: 0.5rem 1rem; overflow-x: auto; background: var(--paper); border-bottom: 1px solid var(--line); scrollbar-width: thin; }
+.hole-chip { flex: 0 0 auto; min-width: 44px; min-height: 44px; padding: 0 0.4rem; display: grid; place-items: center; gap: 0; color: var(--ink); background: var(--cream); border: 1px solid var(--line); border-radius: 10px; font: inherit; font-weight: 800; line-height: 1; cursor: pointer; }
+.hole-chip:hover:not(:disabled) { background: var(--green-pale); }
+.hole-chip--entered { color: var(--success); border-color: #9dc4ad; }
+.hole-chip--current { color: #fff; background: var(--green-dark); border-color: var(--green-dark); }
+.hole-chip--current.hole-chip--entered { color: #fff; }
+.hole-chip__mark { font-size: 0.6rem; line-height: 1; }
+
+/* Strokes received on THIS hole, from the frozen Playing Handicap. */
+.hole-strokes { margin-left: auto; display: grid; justify-items: end; gap: 0.1rem; text-align: right; }
+.hole-strokes small { color: var(--muted); font-size: 0.62rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
+.hole-strokes strong { display: flex; align-items: center; gap: 0.25rem; color: var(--green-dark); font-size: 0.95rem; }
+.hole-strokes--gives strong { color: var(--warning); }
+.hole-strokes__dots { color: var(--green); letter-spacing: 0.08em; }
+
+/* Passive readout: deliberately NOT a live region (§18). */
+.net-preview { margin: 0.6rem 0 0; display: flex; align-items: baseline; gap: 0.45rem; color: var(--muted); font-size: 0.82rem; }
+.net-preview strong { color: var(--ink); font-size: 1rem; }
+
+.hole-actions { padding: 0.6rem 1rem 0; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.hole-actions .button { min-height: 44px; }
+
+/* In-hole team view. Never the authoritative board — the label says so. */
+.team-preview { margin: 0.75rem 1rem 0; padding: 0.6rem 0.75rem; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; }
+.team-preview__head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
+.team-preview__head h2 { margin: 0; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.team-preview__head small { color: var(--muted); font-size: 0.68rem; }
+.team-preview__rows { margin-top: 0.4rem; display: grid; gap: 0.3rem; }
+.team-preview__rows > div { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem; font-size: 0.82rem; }
+.team-preview__rows strong { min-width: 0; overflow: hidden; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.team-preview__rows span { color: var(--muted); font-size: 0.75rem; }
+.team-preview__rows b { color: var(--ink); font-size: 0.9rem; }
+
+.score-footer__actions { display: flex; gap: 0.5rem; }
+.score-footer__actions .button { min-height: 48px; }
+
+/* Provisional device-local standings. Labelled, never mistaken for the board. */
+.local-standings { margin: 1rem 1rem 0; padding: 0.75rem 0.85rem; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; }
+.local-standings .section-heading h2 { font-size: 0.9rem; }
+.local-standings > p { margin: 0.25rem 0 0.6rem; font-size: 0.76rem; }
+.local-standings__rows { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.35rem; }
+.local-standings__rows li { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; padding-bottom: 0.35rem; border-bottom: 1px solid var(--line); font-size: 0.78rem; color: var(--muted); }
+.local-standings__rows li:last-child { border-bottom: 0; padding-bottom: 0; }
+.local-standings__name { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--ink); font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.local-standings__rows b { color: var(--ink); font-size: 0.9rem; }
+
+/* Sunlight: a contrast adjustment on the scoring surfaces, not a new theme.
+   Palette roles and semantic meanings are unchanged (DESIGN.md §Colors). */
+.score-screen--sunlight { --ink: #000; --muted: #333c37; --cream: #fff; --paper: #fff; --line: #6b7670; }
+.score-screen--sunlight { background: #fff; }
+.score-screen--sunlight .score-controls button, .score-screen--sunlight .score-controls input { border-color: #000; border-width: 2px; }
+.score-screen--sunlight .score-row { border-bottom-color: #6b7670; }
+.score-screen--sunlight .hole-chip { border-color: #6b7670; }
+.score-screen--sunlight .hole-strokes strong { color: #06301f; }
+
 .revision-badge { min-width: 74px; padding: 0.65rem; display: grid; text-align: center; background: var(--green-pale); border-radius: 12px; }
 .revision-badge span { color: var(--muted); font-size: 0.65rem; font-weight: 800; text-transform: uppercase; }
 .revision-badge strong { color: var(--green-dark); font-size: 1.3rem; }
@@ -210,6 +270,11 @@ small { color: var(--muted); }
 .leaderboard-name-link { min-height: 44px; display: grid; align-content: center; gap: 0.1rem; color: inherit; text-decoration: none; }
 .leaderboard-name-link:hover { color: var(--green); text-decoration: underline; }
 .leaderboard-row small { text-transform: capitalize; }
+/* best_k/aggregate/shamble rank from member cards, so each member's own
+   scorecard is the attestable artifact and must be reachable from the row. */
+.member-cards { display: flex; flex-wrap: wrap; gap: 0.1rem 0.75rem; }
+.member-cards a { min-height: 44px; display: inline-flex; align-items: center; color: var(--muted); font-size: 0.78rem; font-weight: 700; text-decoration: none; }
+.member-cards a:hover { color: var(--green); text-decoration: underline; }
 .rank { color: var(--muted); font-weight: 850; }
 .result { font-size: 1.2rem; font-weight: 900; text-align: right; }
 .board-footer { min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: var(--muted); font-size: 0.78rem; }
@@ -426,7 +491,10 @@ small { color: var(--muted); }
 .offline-state { padding: 1.25rem; background: var(--paper); border-radius: 14px; }
 .connection-state { margin-bottom: 1rem; display: grid; gap: 0.1rem; }
 .connection-state span { color: var(--muted); font-size: 0.82rem; }
-.snapshot-row { min-height: 62px; display: grid; align-content: center; gap: 0.15rem; border-bottom: 1px solid var(--line); }
+.snapshot-row { min-height: 62px; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; border-bottom: 1px solid var(--line); }
+.snapshot-row > div { min-width: 0; display: grid; align-content: center; gap: 0.15rem; }
+.snapshot-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snapshot-row .button { flex: 0 0 auto; min-height: 44px; }
 .snapshot-row strong { overflow: hidden; font-size: 0.82rem; text-overflow: ellipsis; }
 .snapshot-row span { color: var(--muted); font-size: 0.75rem; }
 

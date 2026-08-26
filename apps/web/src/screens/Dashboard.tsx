@@ -29,6 +29,11 @@ export function Dashboard() {
     ?? events.find((event) => ['published', 'draft'].includes(event.status));
   const competition = query.data?.competitions.find((item) => item.event_id === active?.id);
   const canOrganize = query.data?.roles.some((role) => ['owner', 'league_admin'].includes(role.role)) ?? false;
+  // The league catalog screens (players, courses, seasons) are only reachable
+  // by league id. Derive it from the role rows already loaded above so a fresh
+  // owner never has to know or type a UUID to reach their own prerequisites.
+  const organizerLeagueId = query.data?.roles.find((role) =>
+    ['owner', 'league_admin'].includes(role.role) && role.league_id !== null)?.league_id ?? null;
 
   if (active) {
     window.localStorage.setItem('gtt.activeEventId', active.id);
@@ -42,7 +47,12 @@ export function Dashboard() {
           <h1>Good round, {profile?.displayName.split(' ')[0] ?? 'golfer'}.</h1>
           <p>{active ? 'Your event is ready.' : 'No active event is assigned yet.'}</p>
         </div>
-        {canOrganize && <Link className="button button--quiet" to="/admin/events/new/setup">Create event</Link>}
+        {canOrganize && (
+          <div className="action-row">
+            {organizerLeagueId && <Link className="button button--quiet" to={`/league/${organizerLeagueId}`}>League setup</Link>}
+            <Link className="button button--quiet" to="/admin/events/new/setup">Create event</Link>
+          </div>
+        )}
       </header>
 
       {active ? (
@@ -57,6 +67,22 @@ export function Dashboard() {
             {active.status === 'scoring_open' && <Link className="button button--primary" to={`/events/${active.id}/score`}>Resume scoring</Link>}
             <Link className="button button--secondary" to={`/events/${active.id}`}>Event details</Link>
             {competition && <Link className="text-link" to={`/events/${active.id}/leaderboards/${competition.id}`}>View leaderboard</Link>}
+          </div>
+        </section>
+      ) : canOrganize && events.length === 0 ? (
+        // A fresh owner has no events because nothing is set up yet, not
+        // because they are caught up. An event cannot be created without a
+        // season, a rated tee, and players carrying current handicaps, so say
+        // that and link to the screens that create them.
+        <section className="empty-state">
+          <h2>Set up your league</h2>
+          <p>
+            Creating an event needs a season, a course with a rated tee, and players
+            with current handicap values. League setup holds all three.
+          </p>
+          <div className="action-row">
+            {organizerLeagueId && <Link className="button button--primary" to={`/league/${organizerLeagueId}`}>Open league setup</Link>}
+            <Link className="button button--secondary" to="/admin/events/new/setup">Create event</Link>
           </div>
         </section>
       ) : (

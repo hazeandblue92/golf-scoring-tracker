@@ -469,30 +469,116 @@ describe('submitScoreResponseSchema', () => {
     correlationId: 'req_01H',
   } as const
 
-  it('accepts a committed response and a rejected response with error code', () => {
+  it('accepts every success status', () => {
     expect(submitScoreResponseSchema.safeParse(response).success).toBe(true)
+    expect(
+      submitScoreResponseSchema.safeParse({ ...response, status: 'duplicate' })
+        .success,
+    ).toBe(true)
     expect(
       submitScoreResponseSchema.safeParse({
         ...response,
-        status: 'rejected',
+        status: 'queued_projection',
         projectionRevision: null,
-        errorCode: 'BASE_REVISION_STALE',
       }).success,
     ).toBe(true)
   })
 
-  it('rejects invalid status, invalid error codes, and unknown fields', () => {
+  /**
+   * Regression: the response schema was a single strictObject requiring
+   * non-null revisions on every branch. The conflict body carries conflictId
+   * and nullable revisions, and the rejection envelope carries neither
+   * revisions nor projectionRevision, so both failed to parse and the outbox
+   * requeued outcomes that were meant to be terminal.
+   *
+   * These two objects are byte-for-byte what submit-score/index.ts and the
+   * shared `rejected()` helper actually emit.
+   */
+  it('accepts the conflict body submit-score emits', () => {
+    expect(
+      submitScoreResponseSchema.safeParse({
+        status: 'conflict',
+        scoreRevision: 4,
+        eventRevision: 17,
+        projectionRevision: null,
+        conflictId: UUID_A,
+        errorCode: 'BASE_REVISION_STALE',
+        correlationId: 'req_01H',
+      }).success,
+    ).toBe(true)
+    // The RPC may know neither revision, and may not have a conflict row id.
+    expect(
+      submitScoreResponseSchema.safeParse({
+        status: 'conflict',
+        scoreRevision: null,
+        eventRevision: null,
+        projectionRevision: null,
+        conflictId: null,
+        errorCode: 'BASE_REVISION_STALE',
+        correlationId: 'req_01H',
+      }).success,
+    ).toBe(true)
+  })
+
+  it('accepts the rejection envelope, with and without detail', () => {
+    expect(
+      submitScoreResponseSchema.safeParse({
+        status: 'rejected',
+        errorCode: 'EVENT_LOCKED',
+        correlationId: 'req_01H',
+      }).success,
+    ).toBe(true)
+    expect(
+      submitScoreResponseSchema.safeParse({
+        status: 'rejected',
+        errorCode: 'SCORE_INVALID',
+        detail: 'gross strokes are required exactly when status is complete',
+        correlationId: 'req_01H',
+      }).success,
+    ).toBe(true)
+    // An unrecognized code still parses AS a rejection: treating it as
+    // unparseable would retry a terminal outcome forever (§10.3).
+    expect(
+      submitScoreResponseSchema.safeParse({
+        status: 'rejected',
+        errorCode: 'SOMETHING_ELSE',
+        correlationId: 'req_01H',
+      }).success,
+    ).toBe(true)
+  })
+
+  it('rejects invalid status, unknown fields, and malformed branches', () => {
     expect(
       submitScoreResponseSchema.safeParse({ ...response, status: 'ok' }).success,
     ).toBe(false)
     expect(
+      submitScoreResponseSchema.safeParse({ ...response, retryAfter: 5 }).success,
+    ).toBe(false)
+    // Success must carry authoritative revisions; submit-score converts a
+    // revision-less success into a retryable 5xx rather than emitting this.
+    expect(
+      submitScoreResponseSchema.safeParse({ ...response, scoreRevision: null })
+        .success,
+    ).toBe(false)
+    // Success carries no error code, and no conflict id.
+    expect(
       submitScoreResponseSchema.safeParse({
         ...response,
-        errorCode: 'SOMETHING_ELSE',
+        errorCode: 'EVENT_LOCKED',
       }).success,
     ).toBe(false)
     expect(
-      submitScoreResponseSchema.safeParse({ ...response, retryAfter: 5 }).success,
+      submitScoreResponseSchema.safeParse({ ...response, conflictId: UUID_A })
+        .success,
+    ).toBe(false)
+    // A rejection never reports revisions: no fact was written.
+    expect(
+      submitScoreResponseSchema.safeParse({
+        status: 'rejected',
+        errorCode: 'EVENT_LOCKED',
+        scoreRevision: 4,
+        correlationId: 'req_01H',
+      }).success,
     ).toBe(false)
   })
 })
