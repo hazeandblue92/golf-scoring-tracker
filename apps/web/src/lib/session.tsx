@@ -47,22 +47,52 @@ export interface SessionContextValue {
 const SessionContext = createContext<SessionContextValue | null>(null);
 const PROFILE_CACHE_KEY = 'session-profile-v1';
 
+async function readProfileRow(userId: string) {
+  return getSupabaseClient()
+    .from('profiles')
+    .select('must_change_password, display_name')
+    .eq('id', userId)
+    .single();
+}
+
 async function readCachedProfile(userId: string): Promise<SessionProfile | null> {
   const cached = await db.preferences.get([userId, PROFILE_CACHE_KEY]);
   if (!isSessionProfile(cached?.value)) return null;
   return cached.value;
 }
 
+/**
+ * A profile lookup must never strand the app on its loading screen.
+ *
+ * `browserIsOffline()` is a heuristic over `navigator.onLine` plus a handoff
+ * marker, and it can be wrong: after an offline reload the browser may still
+ * report onLine while every request fails, in which case this function used
+ * to issue a network read that never settled. `profileLoading` then stayed
+ * true forever and RequireActivation held the player on "Loading your
+ * profile…" instead of their scorecard — the exact reload-on-the-course case
+ * offline support exists for. Bound the wait and fall back to the cached
+ * profile, which is what the offline branch would have returned anyway.
+ */
+const PROFILE_FETCH_TIMEOUT_MS = 2_500;
+
 async function fetchProfile(userId: string): Promise<SessionProfile | null> {
   const cached = await readCachedProfile(userId);
   if (browserIsOffline()) return cached;
 
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('must_change_password, display_name')
-    .eq('id', userId)
-    .single();
+  let response: Awaited<ReturnType<typeof readProfileRow>> | null = null;
+  try {
+    response = await Promise.race([
+      readProfileRow(userId),
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), PROFILE_FETCH_TIMEOUT_MS);
+      }),
+    ]);
+  } catch {
+    // Transport failure, not a rejected row: the cached profile still holds.
+    return cached;
+  }
+  if (response === null) return cached;
+  const { data, error } = response;
   if (error !== null || data === null) {
     return cached;
   }
@@ -162,6 +192,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setProfile(next);
         setProfileLoading(false);
       }
+    }).catch(() => {
+      // fetchProfile already falls back to cache; this only guarantees the
+      // loading flag clears, so no failure can leave the app on a spinner.
+      if (!cancelled) setProfileLoading(false);
     });
     return () => {
       cancelled = true;

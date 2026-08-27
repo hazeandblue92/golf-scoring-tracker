@@ -12,7 +12,7 @@ import { enqueueScoreMutation, nextBaseRevision, syncOutbox } from '../lib/offli
 import { initials, relationValue } from '../lib/row-display.ts';
 import { useSession } from '../lib/session.tsx';
 import { getSupabaseClient } from '../lib/supabase.ts';
-import { useOnlineStatus } from '../lib/useOnlineStatus.ts';
+import { noteNetworkUnreachable, useOnlineStatus } from '../lib/useOnlineStatus.ts';
 
 interface HoleRow { id: string; hole_ordinal: number; label: string | null; par: number; stroke_index: number; yardage: number | null }
 interface EntryRow { id: string; participant_id: string; playing_handicap: number | null; participants: { display_name: string; profile_id: string | null } | null }
@@ -35,6 +35,14 @@ interface ScoreEntryData extends ScoreEntrySnapshot {
   dataSource: 'server' | 'cache';
   cachedAt: number;
 }
+
+/**
+ * Beyond this, a stalled server read yields to the cached scorecard. Matches
+ * the 5-second network timeout the service worker already applies to event and
+ * projection routes, so the app waits the same amount everywhere before it
+ * decides the network is not going to answer.
+ */
+const SNAPSHOT_FETCH_TIMEOUT_MS = 5_000;
 
 export function ScoreEntry() {
   const { eventId = '' } = useParams();
@@ -77,7 +85,17 @@ export function ScoreEntry() {
         return readCached(new Error('No saved offline scorecard is available for this event.'));
       }
 
-      try {
+      // A dead zone does not always look like an error. A phone can hold a
+      // radio link that carries nothing, and the request then hangs instead
+      // of failing, which used to leave this screen on its skeleton with a
+      // perfectly good cached scorecard sitting in IndexedDB. Bound the wait
+      // and fall back to that copy — the same thing the offline branch above
+      // would have done.
+      const timedOut = Symbol('score-entry-snapshot-timeout');
+      const deadline = new Promise<typeof timedOut>((resolve) => {
+        setTimeout(() => resolve(timedOut), SNAPSHOT_FETCH_TIMEOUT_MS);
+      });
+      const readFromServer = async (): Promise<ScoreEntryData> => {
         const supabase = getSupabaseClient();
         const { data: event, error } = await supabase.from('events').select('id,league_id,name,status,scoring_revision').eq('id', eventId).single();
         if (error) throw error;
@@ -188,7 +206,20 @@ export function ScoreEntry() {
           userId: session!.user.id,
         });
         return { ...snapshot, drafts, dataSource: 'server', cachedAt } satisfies ScoreEntryData;
+      };
+
+      try {
+        const result = await Promise.race([readFromServer(), deadline]);
+        if (result === timedOut) {
+          // Tell the rest of the app what this screen just learned, so the
+          // sync banner and the offline notice stop claiming a working
+          // connection the device does not actually have.
+          noteNetworkUnreachable();
+          return readCached(new Error('The server did not respond; showing the saved scorecard.'));
+        }
+        return result;
       } catch (error) {
+        noteNetworkUnreachable();
         return readCached(error);
       }
     },

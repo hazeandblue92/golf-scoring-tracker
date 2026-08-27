@@ -29,6 +29,21 @@ export function refreshOfflineMarkerOnPageExit(
 }
 
 /**
+ * Record first-hand evidence that the network is unusable.
+ *
+ * `navigator.onLine` only reports whether an interface exists, not whether it
+ * carries anything: a phone on a captive portal or parked under a dead cell
+ * tower reports true while every request stalls. A component that has just
+ * watched a request time out knows better than the browser does, and this
+ * lets it say so once, for the whole app, rather than each screen drawing its
+ * own conclusion.
+ */
+export function noteNetworkUnreachable(now = Date.now()): void {
+  window.sessionStorage.setItem(OFFLINE_SESSION_KEY, String(now));
+  window.dispatchEvent(new Event('offline'));
+}
+
+/**
  * `navigator.onLine` can briefly report true during an offline document
  * reload. Preserve the browser's explicit offline event for this tab so the
  * new document can choose IndexedDB before attempting a network request.

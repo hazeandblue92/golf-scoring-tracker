@@ -32,6 +32,8 @@ import {
 } from '../src/lib/offline/outbox.ts';
 import {
   OFFLINE_MARKER_MAX_AGE_MS,
+  OFFLINE_SESSION_KEY,
+  noteNetworkUnreachable,
   offlineMarkerIsActive,
   refreshOfflineMarkerOnPageExit,
 } from '../src/lib/useOnlineStatus.ts';
@@ -162,6 +164,43 @@ describe('offline reload marker', () => {
     refreshOfflineMarkerOnPageExit(true, storage, 200_000);
 
     expect(writes).toEqual([['gtt.networkOffline', '100000']]);
+  });
+});
+
+/**
+ * Regression: after an offline reload the app stayed on "Loading your
+ * profile…" forever, then on the score skeleton, then finally rendered but
+ * claimed it was online.
+ *
+ * The common cause was trusting `navigator.onLine`, which reports whether an
+ * interface exists — not whether it carries anything. A phone on a captive
+ * portal or under a dead cell tower reports true while every request stalls,
+ * and a stalled request is not an error, so nothing ever settled.
+ */
+describe('unusable network is treated as offline', () => {
+  it('marks the app offline from first-hand evidence, not navigator.onLine', () => {
+    const events: string[] = [];
+    const store = new Map<string, string>();
+    const originalStorage = globalThis.window;
+    // Minimal window stand-in: this helper only writes a marker and fires one
+    // event, and both are observable without a DOM.
+    (globalThis as { window?: unknown }).window = {
+      sessionStorage: {
+        setItem: (key: string, value: string) => void store.set(key, value),
+      },
+      dispatchEvent: (event: Event) => { events.push(event.type); return true; },
+    };
+    try {
+      noteNetworkUnreachable(1_700_000_000_000);
+      expect(store.get(OFFLINE_SESSION_KEY)).toBe('1700000000000');
+      // The event is what makes the whole app agree, not just the caller.
+      expect(events).toEqual(['offline']);
+      // The marker it writes must read as active, or the notice would still
+      // claim a working connection.
+      expect(offlineMarkerIsActive('1700000000000', true, 1_700_000_000_100)).toBe(true);
+    } finally {
+      (globalThis as { window?: unknown }).window = originalStorage;
+    }
   });
 });
 
