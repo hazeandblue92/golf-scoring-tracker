@@ -28,7 +28,50 @@ interface CatalogRequest {
   ratingCategory?: string | null
   courseRating?: number
   slopeRating?: number
+  courseLayoutId?: string
   holes?: Array<{ ordinal: number; par: number; yardage: number | null; strokeIndex: number }>
+}
+
+type HoleRow = { ordinal: number; par: number; yardage: number | null; strokeIndex: number }
+
+/**
+ * Ordinals and stroke indexes must each be a complete 1..N set.
+ *
+ * This is not a formality: `allocateStrokes` in the scoring engine throws
+ * unless stroke indexes are a permutation of 1..N, because that permutation is
+ * exactly what converts a Playing Handicap into strokes on specific holes. A
+ * tee saved with a duplicate or missing index produces an event that cannot be
+ * scored at all.
+ */
+function assertHoleSet(holes: HoleRow[]): void {
+  const ordinals = new Set(holes.map((hole) => hole.ordinal))
+  const indexes = new Set(holes.map((hole) => hole.strokeIndex))
+  if (
+    ordinals.size !== holes.length ||
+    indexes.size !== holes.length ||
+    holes.some((hole) =>
+      hole.par < 3 || hole.par > 6 ||
+      hole.ordinal < 1 || hole.ordinal > holes.length ||
+      hole.strokeIndex < 1 || hole.strokeIndex > holes.length)
+  ) {
+    throw new Error('Hole ordinals and stroke indexes must each be a complete unique set')
+  }
+}
+
+function teeHoleRows(teeId: string, holes: HoleRow[]) {
+  return holes.map((hole) => ({
+    tee_set_id: teeId,
+    hole_ordinal: hole.ordinal,
+    course_hole_label: String(hole.ordinal),
+    par: hole.par,
+    yardage: hole.yardage,
+    stroke_index: hole.strokeIndex,
+  }))
+}
+
+/** PostgREST returns an embedded relation as an object or a single-item array. */
+function relationRow<T>(value: T | T[] | null | undefined): T | null {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null
 }
 
 Deno.serve(async (req: Request) => {
@@ -66,9 +109,7 @@ Deno.serve(async (req: Request) => {
     } else if (body.action === 'create-course') {
       const holes = body.holes ?? []
       if (!body.name?.trim() || !body.layoutName?.trim() || !body.teeName?.trim() || !body.timezone || !body.courseRating || !body.slopeRating || ![9, 18].includes(holes.length)) throw new Error('Complete course, tee, rating, and 9 or 18 holes are required')
-      const ordinals = new Set(holes.map((hole) => hole.ordinal))
-      const indexes = new Set(holes.map((hole) => hole.strokeIndex))
-      if (ordinals.size !== holes.length || indexes.size !== holes.length || holes.some((hole) => hole.par < 3 || hole.par > 6 || hole.ordinal < 1 || hole.ordinal > holes.length || hole.strokeIndex < 1 || hole.strokeIndex > holes.length)) throw new Error('Hole ordinals and stroke indexes must each be a complete unique set')
+      assertHoleSet(holes)
       const courseId = targetId
       const layoutId = crypto.randomUUID()
       const teeId = crypto.randomUUID()
@@ -79,7 +120,41 @@ Deno.serve(async (req: Request) => {
       if (result.error) throw result.error
       result = await service.from('tee_sets').insert({ id: teeId, course_layout_id: layoutId, name: body.teeName.trim(), rating_category: body.ratingCategory ?? null, course_rating: body.courseRating, slope_rating: body.slopeRating, par, version: 1, status: 'active' })
       if (result.error) throw result.error
-      result = await service.from('tee_holes').insert(holes.map((hole) => ({ tee_set_id: teeId, hole_ordinal: hole.ordinal, course_hole_label: String(hole.ordinal), par: hole.par, yardage: hole.yardage, stroke_index: hole.strokeIndex })))
+      result = await service.from('tee_holes').insert(teeHoleRows(teeId, holes))
+      if (result.error) throw result.error
+    } else if (body.action === 'add-tee') {
+      // A course legitimately has several tees; the schema has always modelled
+      // that (courses -> course_layouts -> tee_sets is one-to-many). Only the
+      // write path was missing, so every tee arrived as a duplicate course.
+      const holes = body.holes ?? []
+      if (!body.courseLayoutId || !body.teeName?.trim() || !body.courseRating || !body.slopeRating || ![9, 18].includes(holes.length)) {
+        throw new Error('Layout, tee name, rating, slope, and 9 or 18 holes are required')
+      }
+      assertHoleSet(holes)
+
+      // The grant above proves league admin for body.leagueId. It does NOT
+      // prove this layout belongs to that league, so without this check an
+      // admin of one league could attach a tee to another league's course.
+      const { data: layout, error: layoutError } = await service
+        .from('course_layouts')
+        .select('id,hole_count,courses!inner(league_id)')
+        .eq('id', body.courseLayoutId)
+        .maybeSingle()
+      if (layoutError) throw layoutError
+      const owner = relationRow(layout?.courses as { league_id: string } | { league_id: string }[] | null)
+      if (!layout || owner?.league_id !== body.leagueId) {
+        throw new Error('Course layout does not belong to this league')
+      }
+      if (layout.hole_count !== holes.length) {
+        throw new Error(`Layout has ${layout.hole_count} holes; received ${holes.length}`)
+      }
+
+      const teeId = crypto.randomUUID()
+      targetId = teeId
+      const par = holes.reduce((sum, hole) => sum + hole.par, 0)
+      let result = await service.from('tee_sets').insert({ id: teeId, course_layout_id: body.courseLayoutId, name: body.teeName.trim(), rating_category: body.ratingCategory ?? null, course_rating: body.courseRating, slope_rating: body.slopeRating, par, version: 1, status: 'active' })
+      if (result.error) throw result.error
+      result = await service.from('tee_holes').insert(teeHoleRows(teeId, holes))
       if (result.error) throw result.error
     } else {
       return rejected(400, 'SNAPSHOT_INVALID', correlationId, 'Unknown catalog action')

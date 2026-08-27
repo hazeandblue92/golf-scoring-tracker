@@ -35,7 +35,7 @@ column exists are `legacy`: unknown intent, never silently promoted.
 | --- | --- | --- | --- |
 | `seasons` | Season windows per league | `league_id` + `name` (unique), `starts_on`, `ends_on`, `status` | Read: members. Write: owner/league_admin |
 | `participants` | League roster incl. guests without accounts | `league_id`, `profile_id` (nullable), `display_name`, `sort_name`, `external_ref`, `status`, `organizer_notes` | Read: members, but `organizer_notes` is excluded via column-level grants; organizers read notes through `public.participant_organizer_notes()`. Write: owner/league_admin |
-| `participant_handicaps` | Signed handicap values (plus handicaps negative); non-overlapping validity via unique (participant, effective_from) plus gist exclusion on the daterange | `participant_id`, `value numeric(5,1)`, `source`, `effective_from/to`, `verified_at/by`, `source_reference` | Read: owner/league_admin/event_director. Write: owner/league_admin (imports via `import-csv` EF) |
+| `participant_handicaps` | Signed handicap values (plus handicaps negative); non-overlapping validity via unique (participant, effective_from) plus gist exclusion on the daterange | `participant_id`, `value numeric(5,1)`, `source`, `effective_from/to`, `verified_at/by`, `source_reference` | Read: owner/league_admin/event_director. Write: owner/league_admin, entered through the `catalog-admin` Edge Function |
 | `teams` | Current league teams (events use snapshots, not these rows) | `league_id`, `season_id` (nullable), `name`, `status` | Read: members. Write: owner/league_admin |
 | `team_members` | Team membership over time | `team_id`, `participant_id`, `valid_from/to` (unique triple) | Read: members. Write: owner/league_admin |
 
@@ -45,7 +45,7 @@ column exists are `legacy`: unknown intent, never silently promoted.
 | --- | --- | --- | --- |
 | `courses` | Course master data | `league_id`, `name`, `location_text`, `timezone`, `status` | Read: members. Write: owner/league_admin |
 | `course_layouts` | Versioned hole layouts (9 or 18) | `course_id`, `name`, `hole_count`, `version`, `effective_from`, `retired_at` | Read: members. Write: owner/league_admin |
-| `tee_sets` | Rated tees; slope CHECK 55..155 (WHS) | `course_layout_id`, `name`, `rating_category`, `course_rating numeric(5,1)`, `slope_rating`, `par`, `version`, `status` | Read: members. Write: owner/league_admin |
+| `tee_sets` | Rated tees; slope CHECK 55..155 (WHS). A layout carries one row per tee (Black/Blue/White/Gold); an event plays exactly one, selected at setup and frozen at publish. Added via `catalog-admin` `create-course` (first tee) or `add-tee` (subsequent) | `course_layout_id`, `name`, `rating_category`, `course_rating numeric(5,1)`, `slope_rating`, `par`, `version`, `status` | Read: members. Write: owner/league_admin |
 | `tee_holes` | Per-hole par/yardage/stroke index; PK (tee_set, ordinal); unique (tee_set, stroke_index) | `tee_set_id`, `hole_ordinal`, `par`, `yardage`, `stroke_index` | Read: members. Write: owner/league_admin |
 
 ## Event setup (section 11.5, migration 5)
