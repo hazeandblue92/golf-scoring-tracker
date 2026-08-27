@@ -9,6 +9,7 @@ import {
   resolveScoreConflict,
   substituteEventEntry,
 } from '../lib/phase1.ts';
+import { relationName } from '../lib/row-display.ts';
 import { getSupabaseClient } from '../lib/supabase.ts';
 
 export function AdminEventScoring() {
@@ -195,6 +196,3 @@ export function AdminEventScoring() {
 
 function formatScore(value: unknown) { const score = value as { grossStrokes?: number | null; status?: string }; return score.grossStrokes ?? score.status ?? 'empty'; }
 
-function relationName(value: { display_name: string } | Array<{ display_name: string }> | null) {
-  return (Array.isArray(value) ? value[0] : value)?.display_name ?? 'Player';
-}

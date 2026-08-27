@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { Link, useParams } from 'react-router';
 
+import { relationName } from '../lib/row-display.ts';
 import { getSupabaseClient } from '../lib/supabase.ts';
 
 export function Skins() {
@@ -84,6 +85,3 @@ export function Skins() {
   </div>;
 }
 
-function relationName(value: { display_name: string } | { display_name: string }[] | null) {
-  return (Array.isArray(value) ? value[0]?.display_name : value?.display_name) ?? 'Player';
-}

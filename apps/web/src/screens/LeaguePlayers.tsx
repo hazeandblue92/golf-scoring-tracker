@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router';
 
 import { invokePhase1, saveCatalogItem } from '../lib/phase1.ts';
+import { initials } from '../lib/row-display.ts';
 import { getSupabaseClient } from '../lib/supabase.ts';
 
 export function LeaguePlayers() {
@@ -43,5 +44,4 @@ export function LeaguePlayers() {
   return <div className="screen catalog-screen"><header className="page-header"><Link className="back-link" to={`/league/${leagueId}`}>Back to league</Link><h1>Players</h1><p>League roster and verified handicap values.</p></header>{error && <p className="form-message form-message--error" role="alert">{error}</p>}{message && <p className="form-message form-message--success" role="status">{message}</p>}<div className="catalog-layout"><section><div className="section-heading"><h2>Roster</h2><span>{query.data?.length ?? 0}</span></div><div className="directory-list">{query.isLoading ? <div className="skeleton skeleton--rows" /> : query.data?.map((player) => <div key={player.id}><span className="initials">{initials(player.display_name)}</span><div><strong>{player.display_name}</strong><small>{player.profile_id ? 'Account linked' : 'Guest player'}</small></div><span className="handicap-value">{formatHandicap(player.handicap)}</span></div>)}</div></section><section className="catalog-form"><h2>Add a player</h2><form className="form-stack" onSubmit={(event) => void submit(event)}><div className="field"><label htmlFor="player-name">Display name</label><input id="player-name" name="displayName" required /></div><div className="field"><label htmlFor="handicap">Verified handicap index</label><input id="handicap" name="handicapValue" type="number" min="-10" max="54" step="0.1" defaultValue="0" required /><small>Plus handicaps use a negative value, such as −1.2.</small></div><div className="field"><label htmlFor="username">Username (optional)</label><input id="username" name="username" pattern="[a-z0-9._-]{3,32}" autoCapitalize="none" /><small>Leave blank for a guest without sign-in access.</small></div><button className="button button--primary" type="submit" disabled={busy}>{busy ? 'Adding…' : 'Add player'}</button></form></section></div></div>;
 }
 
-function initials(name: string) { return name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join(''); }
 function formatHandicap(value?: number) { if (value === undefined) return '—'; return value < 0 ? `+${Math.abs(value).toFixed(1)}` : value.toFixed(1); }

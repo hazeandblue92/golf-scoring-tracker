@@ -18,6 +18,7 @@ import {
   type MatchProjectionRow,
 } from '../lib/match-view.ts';
 import { setMatchResult } from '../lib/phase1.ts';
+import { relationName } from '../lib/row-display.ts';
 import { getSupabaseClient } from '../lib/supabase.ts';
 
 /**
@@ -581,6 +582,3 @@ function statusLabel(status: string) {
             : 'Scheduled';
 }
 
-function relationName(value: { display_name: string } | Array<{ display_name: string }> | null) {
-  return (Array.isArray(value) ? value[0] : value)?.display_name ?? 'Player';
-}

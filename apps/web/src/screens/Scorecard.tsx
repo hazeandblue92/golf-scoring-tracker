@@ -5,6 +5,7 @@ import { Link, useParams } from 'react-router';
 import { strokesReceivedOnHole } from '@gtt/scoring';
 
 import { attestScorecard } from '../lib/phase1.ts';
+import { relationValue } from '../lib/row-display.ts';
 import { getSupabaseClient } from '../lib/supabase.ts';
 
 export function Scorecard() {
@@ -137,9 +138,6 @@ function signedStrokes(strokes: number) {
   return strokes > 0 ? `−${strokes}` : `+${Math.abs(strokes)}`;
 }
 
-function relationValue<T>(value: T | T[] | null): T | null {
-  return Array.isArray(value) ? value[0] ?? null : value;
-}
 
 function statusShort(status?: string) {
   if (!status) return '—';

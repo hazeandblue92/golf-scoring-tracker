@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router';
 
+import { relationName, relationValue } from '../lib/row-display.ts';
 import { getSupabaseClient } from '../lib/supabase.ts';
 
 export function Leaderboard() {
@@ -192,13 +193,7 @@ export function Leaderboard() {
   );
 }
 
-function relationName(value: { display_name: string } | { display_name: string }[] | null) {
-  return (Array.isArray(value) ? value[0]?.display_name : value?.display_name) ?? 'Player';
-}
 
-function relationValue<T>(value: T | T[] | null | undefined): T | null {
-  return Array.isArray(value) ? value[0] ?? null : value ?? null;
-}
 
 interface TeamMemberRelation {
   position: number | null;

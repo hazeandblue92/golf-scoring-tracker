@@ -54,7 +54,22 @@ The default provisioning is 100 GiB, which is a ratchet aimed at the host disk.
    Drive under `CloudDocs`/`FileProvider`). Check System Settings → General →
    Storage for those.
 
-3. **Rebuild the VM with a bounded disk.** `colima delete` removes the VM but
+3. **Try `fstrim` first — it usually makes step 4 unnecessary.** Deleting
+   images or resetting the database frees blocks *inside* the VM filesystem,
+   but the host's sparse file keeps them until the guest issues a discard.
+   One command hands them back, with the stack running and nothing destroyed:
+
+   ```bash
+   colima ssh -- sudo fstrim -av
+   ```
+
+   Measured on 2026-08-26 after a day of repeated `supabase db reset` runs:
+   the datadisk fell from 18 GiB to 10 GiB allocated and the host went from
+   9.7 GiB to 18 GiB free, in seconds, with no image re-pull. Re-run
+   `npm run check:disk` and stop here if that cleared the shortfall.
+
+4. **Rebuild the VM with a bounded disk**, only if trimming was not enough.
+   `colima delete` removes the VM but
    deliberately **keeps** the datadisk so Docker data survives a VM rebuild.
    After the delete, `limactl disk list` reports no disks while the file is
    still on disk — orphaned, and safe to remove.
@@ -68,7 +83,7 @@ The default provisioning is 100 GiB, which is a ratchet aimed at the host disk.
    40 GiB comfortably fits the ~9 GiB of Supabase images plus the database and
    leaves the cap well below the host's free space.
 
-4. **Rebuild the stack.** Everything local is reproducible from migrations and
+5. **Rebuild the stack.** Everything local is reproducible from migrations and
    `supabase/seed.sql`; nothing of value lives only in the local database.
 
    ```bash

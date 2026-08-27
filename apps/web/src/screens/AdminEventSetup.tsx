@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 
 import { publishEvent, saveEventDraft } from '../lib/phase1.ts';
+import { relationValue } from '../lib/row-display.ts';
 import { getSupabaseClient } from '../lib/supabase.ts';
 
 type CompetitionPreset =
@@ -761,9 +762,6 @@ function pairingMessage(preset: CompetitionPreset) {
   return `Select enough players for at least two complete ${teamSize}-player teams, with each player assigned once.`;
 }
 
-function relationValue<T>(value: T | T[] | null): T | null {
-  return Array.isArray(value) ? value[0] ?? null : value;
-}
 
 function localDateTime(value: string) {
   const date = new Date(value);

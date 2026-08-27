@@ -9,6 +9,7 @@ import { db } from '../lib/offline/db.ts';
 import type { ScoreDraftRow } from '../lib/offline/db.ts';
 import { localStrokePlay } from '../lib/offline/local-projections.ts';
 import { enqueueScoreMutation, nextBaseRevision, syncOutbox } from '../lib/offline/outbox.ts';
+import { initials, relationValue } from '../lib/row-display.ts';
 import { useSession } from '../lib/session.tsx';
 import { getSupabaseClient } from '../lib/supabase.ts';
 import { useOnlineStatus } from '../lib/useOnlineStatus.ts';
@@ -636,13 +637,7 @@ export function ScoreEntry() {
   );
 }
 
-function initials(name: string) {
-  return name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('');
-}
 
-function relationValue<T>(value: T | T[] | null): T | null {
-  return Array.isArray(value) ? value[0] ?? null : value;
-}
 
 function isScoreEntrySnapshot(value: unknown): value is ScoreEntrySnapshot {
   if (typeof value !== 'object' || value === null) return false;

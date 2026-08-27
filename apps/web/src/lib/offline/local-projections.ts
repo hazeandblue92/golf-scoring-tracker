@@ -57,7 +57,7 @@ export interface LocalDraftScore {
   baseRevision: number;
 }
 
-export function toHoleSnapshots(holes: readonly LocalHole[]): HoleSnapshot[] {
+function toHoleSnapshots(holes: readonly LocalHole[]): HoleSnapshot[] {
   return holes
     .map((hole) => ({
       id: hole.id,

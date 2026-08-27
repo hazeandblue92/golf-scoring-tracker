@@ -19,7 +19,17 @@ import {
   type LocalHole,
   type LocalScore,
 } from '../src/lib/offline/local-projections.ts';
-import { decideFromResponse, mutationFactKey, nextBaseRevision } from '../src/lib/offline/outbox.ts';
+import {
+  BACKOFF_CAP_MS,
+  BACKOFF_JITTER_MAX,
+  RECEIPT_RETENTION_MS,
+  RETRYABLE_ERROR_CODES,
+  TERMINAL_ERROR_CODES,
+  backoffDelayMs,
+  decideFromResponse,
+  mutationFactKey,
+  nextBaseRevision,
+} from '../src/lib/offline/outbox.ts';
 import {
   OFFLINE_MARKER_MAX_AGE_MS,
   offlineMarkerIsActive,
@@ -247,13 +257,45 @@ describe('submit-score outcome classification', () => {
   });
 
   it('retries only the documented transient outcomes', () => {
-    for (const errorCode of ['RATE_LIMITED', 'SERVICE_UNAVAILABLE', 'PROJECTION_STALE']) {
+    // Driven from the exported constant so the policy and the test cannot
+    // drift apart: adding a code to the list is what makes it retryable.
+    for (const errorCode of RETRYABLE_ERROR_CODES) {
       expect(decideFromResponse(400, { status: 'rejected', errorCode, correlationId }))
         .toEqual({ kind: 'retry' });
     }
     expect(decideFromResponse(500, null)).toEqual({ kind: 'retry' });
     expect(decideFromResponse(502, '<html>gateway</html>')).toEqual({ kind: 'retry' });
     expect(decideFromResponse(200, null)).toEqual({ kind: 'retry' });
+  });
+
+  it('treats every documented terminal code as terminal', () => {
+    // The module exports this list to state the §10.3 policy. Assert it is
+    // real behaviour rather than a comment: no terminal code may retry.
+    for (const errorCode of TERMINAL_ERROR_CODES) {
+      expect(
+        decideFromResponse(400, { status: 'rejected', errorCode, correlationId }),
+        errorCode,
+      ).toEqual({ kind: 'rejected', errorCode });
+    }
+    // The two lists must stay disjoint, or a code's fate depends on ordering.
+    const retryable = new Set<string>(RETRYABLE_ERROR_CODES);
+    expect(TERMINAL_ERROR_CODES.filter((code) => retryable.has(code))).toEqual([]);
+  });
+
+  it('bounds backoff by the documented cap and jitter', () => {
+    // random() = 1 is the worst case, so every delay must still fit the cap.
+    for (let attempts = 1; attempts <= 12; attempts += 1) {
+      const delay = backoffDelayMs(attempts, () => 1);
+      expect(delay).toBeLessThanOrEqual(BACKOFF_CAP_MS);
+      expect(delay).toBeGreaterThan(0);
+    }
+    // Below the cap the jitter widens the base delay but never shrinks it.
+    expect(backoffDelayMs(1, () => 0)).toBe(2_000);
+    expect(backoffDelayMs(1, () => 1)).toBeCloseTo(2_000 * (1 + BACKOFF_JITTER_MAX), 5);
+  });
+
+  it('retains receipts for at least the seven days the spec requires', () => {
+    expect(RECEIPT_RETENTION_MS).toBe(7 * 24 * 60 * 60 * 1000);
   });
 
   it('keeps an unrecognized rejection terminal rather than retrying forever', () => {
