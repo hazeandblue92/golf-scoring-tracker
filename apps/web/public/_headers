@@ -8,6 +8,15 @@
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
 
+# Cloudflare Pages canonicalizes /index.html to / with a 308, so a rule on
+# /index.html alone never reaches the shell a browser is actually served: the
+# redirect carries the header and the 200 that follows falls back to the Pages
+# default of "public, max-age=0, must-revalidate". Both paths are listed so the
+# shell is no-store however it was requested — a stale shell is how a bad
+# release survives a rollback.
+/
+  Cache-Control: no-store
+
 /index.html
   Cache-Control: no-store
 
