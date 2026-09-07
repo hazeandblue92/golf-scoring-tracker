@@ -116,8 +116,9 @@ of it can be closed by code.
 
 1. Migrations 38–39 applied to the hosted project; Edge Functions and web app
    redeployed; authenticated health confirmed.
-2. Backup secrets set, age identity stored on two devices, backup and
-   maintenance workflows run green and retained.
+2. Backup secrets set, backup and maintenance workflows run green and retained
+   (backup run 34171228255; maintenance run 34171140189). The owner still needs
+   to confirm the age private identity is stored on two devices.
 3. Clean-stack portable restore drill and an encrypted-backup restore drill
    from a second device, compared by result hash rather than checksum.
 4. Production capacity run at the 120-client profile against the deployed
