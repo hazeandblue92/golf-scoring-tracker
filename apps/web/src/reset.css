@@ -474,8 +474,31 @@ small { color: var(--muted); }
 .settings-links a { display: grid; justify-content: stretch; }
 
 .catalog-layout { display: grid; gap: 3rem; }
-.directory-list > div { min-height: 66px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 0.75rem; border-bottom: 1px solid var(--line); }
+/* Avatar, identity, handicap, and the Manage toggle; the editor form opens as
+   a full-width row beneath them rather than squeezing into a column. */
+.directory-list > div { min-height: 66px; padding: 0.5rem 0; display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 0.75rem; border-bottom: 1px solid var(--line); }
 .directory-list > div > div { display: grid; gap: 0.1rem; }
+
+.player-editor { grid-column: 1 / -1; margin-top: 0.5rem; padding: 1rem; display: grid; gap: 1rem; background: var(--paper); border-radius: 14px; }
+.player-editor .field { max-width: 22rem; }
+.handicap-revision { margin: 0; padding: 1rem; display: grid; gap: 0.85rem; border: 1px solid var(--line); border-radius: 12px; }
+.handicap-revision legend { padding: 0 0.4rem; font-size: 0.82rem; font-weight: 800; }
+.handicap-revision p { margin: 0; font-size: 0.85rem; }
+.account-actions { display: grid; gap: 0.75rem; padding-top: 0.85rem; border-top: 1px solid var(--line); }
+.account-actions h3 { margin: 0; font-size: 0.95rem; }
+.account-actions .field { flex: 1 1 12rem; }
+.account-actions p { margin: 0; flex-basis: 100%; }
+
+.import-report { margin-top: 1.25rem; display: grid; gap: 0.85rem; }
+.import-report h3 { margin: 0; font-size: 0.95rem; }
+/* Severity carries a word and a border, never colour alone (§18). */
+.issue-list { margin: 0; padding-left: 1.1rem; display: grid; gap: 0.4rem; font-size: 0.85rem; }
+.issue-list li { color: var(--muted); }
+.issue-list--error li { color: #701b16; }
+.table-scroll { overflow-x: auto; }
+.import-plan { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.import-plan th, .import-plan td { padding: 0.5rem 0.6rem; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.import-plan th { color: var(--muted); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; }
 .handicap-value { font-size: 1.05rem; font-weight: 900; }
 .catalog-form { padding: 1.25rem; align-self: start; background: var(--paper); border-radius: 14px; }
 .season-list > div { min-height: 78px; padding: 0.75rem 0; display: grid; gap: 0.4rem; border-bottom: 1px solid var(--line); }

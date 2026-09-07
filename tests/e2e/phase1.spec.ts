@@ -809,3 +809,93 @@ test('organizer publishes a four-player scramble and enters one team ball', asyn
   await expect(page.getByText('Current scorecard revision attested.')).toBeVisible({ timeout: 30_000 });
   await expectAccessible(page);
 });
+
+/**
+ * The roster screen is the one surface an organizer must operate to run a
+ * season — add players, revise handicaps, fix an account, move a whole roster
+ * in from a spreadsheet — and until now none of it existed. §4.2 requires the
+ * CSV path to be a dry run the organizer confirms, so the test proves the
+ * preview writes nothing before the confirmation, then that the apply writes
+ * exactly what the preview promised.
+ */
+test('organizer imports a roster from CSV, then revises a handicap and an account', async ({ page }) => {
+  const tag = randomUUID().slice(0, 6);
+  const importedName = `E2E Import ${tag}`;
+  const service = serviceClient();
+
+  await signInOrganizer(page);
+  await page.goto(`/league/${LEAGUE_ID}/players`);
+  await expect(page.getByRole('heading', { name: 'Players', exact: true })).toBeVisible();
+  await expectAccessible(page);
+
+  // Dry run: the report names the change, and nothing is written yet.
+  await page.getByLabel('…or paste the rows').fill(
+    `display_name,handicap_index,handicap_source\n${importedName},14.2,league_value\n`,
+  );
+  await page.getByRole('button', { name: 'Check the file' }).click();
+  await expect(page.getByRole('heading', { name: /Dry run/ })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('cell', { name: importedName })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'Add', exact: true })).toBeVisible();
+  const beforeApply = await service
+    .from('participants').select('id').eq('league_id', LEAGUE_ID).eq('display_name', importedName);
+  expect(beforeApply.data ?? []).toHaveLength(0);
+  await expectAccessible(page);
+
+  await page.getByRole('button', { name: /^Import 1 player$/ }).click();
+  await expect(page.getByText('1 player imported.')).toBeVisible({ timeout: 30_000 });
+  const row = page.locator('.directory-list > div').filter({ hasText: importedName });
+  await expect(row).toBeVisible();
+  await expect(row.locator('.handicap-value')).toHaveText('14.2');
+
+  // Same day as the import, so this corrects the open interval rather than
+  // opening a second one — an organizer fixing a number they just typed does
+  // not create a period during which the wrong value was "in force". The
+  // interval-closing case (a revision dated later) is covered by
+  // tests/integration/test/roster-administration.test.ts.
+  await row.getByRole('button', { name: 'Manage' }).click();
+  await row.getByLabel('Handicap index').fill('11.6');
+  await row.getByRole('button', { name: 'Save player' }).click();
+  await expect(page.getByText(/handicap 11.6 effective/)).toBeVisible({ timeout: 30_000 });
+  await expect(row.locator('.handicap-value')).toHaveText('11.6');
+
+  const { data: participant } = await service
+    .from('participants').select('id').eq('league_id', LEAGUE_ID).eq('display_name', importedName).single();
+  const { data: history } = await service
+    .from('participant_handicaps').select('value, effective_to')
+    .eq('participant_id', participant?.id as string).order('effective_from');
+  expect(history?.map((h) => Number(h.value))).toEqual([11.6]);
+  expect(history?.[0]?.effective_to).toBeNull();
+
+  // Roster status is not deletion: an inactive player keeps every past score.
+  await row.getByRole('button', { name: 'Manage' }).click();
+  await row.getByLabel('Roster status').selectOption('inactive');
+  await row.getByRole('button', { name: 'Save player' }).click();
+  await expect(page.getByText(`${importedName} updated.`)).toBeVisible({ timeout: 30_000 });
+  await expectAccessible(page);
+
+  // An account action names the person and the consequence before it happens (§5.3).
+  const accountName = `e2e${tag}`;
+  const seeded = await createAccount(service, { displayName: `E2E Account ${tag}`, username: accountName });
+  const membership = await service.from('league_memberships')
+    .insert({ league_id: LEAGUE_ID, profile_id: seeded.profileId, member_status: 'active' });
+  if (membership.error) throw membership.error;
+  const linked = await service.from('participants').insert({
+    league_id: LEAGUE_ID, profile_id: seeded.profileId,
+    display_name: `E2E Account ${tag}`, sort_name: `e2e account ${tag}`, status: 'active',
+  });
+  if (linked.error) throw linked.error;
+
+  await page.reload();
+  const accountRow = page.locator('.directory-list > div').filter({ hasText: `E2E Account ${tag}` });
+  await accountRow.getByRole('button', { name: 'Manage' }).click();
+  await accountRow.getByRole('button', { name: 'Disable sign-in' }).click();
+  await expect(page.getByText(new RegExp(`Disable sign-in for E2E Account ${tag}\\?`))).toBeVisible();
+  await accountRow.getByRole('button', { name: 'Disable sign-in' }).click();
+  await expect(page.getByText(/can no longer sign in/)).toBeVisible({ timeout: 30_000 });
+
+  const { data: disabled } = await service
+    .from('profiles').select('status').eq('id', seeded.profileId).single();
+  expect(disabled?.status).toBe('disabled');
+  await expectAccessible(page);
+  await expectNarrowReflow(page);
+});
