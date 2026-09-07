@@ -110,6 +110,30 @@ column exists are `legacy`: unknown intent, never silently promoted.
 | `app.is_operator()` | Owner/league_admin anywhere; gates ops tables |
 | `public.participant_organizer_notes(participant)` | RPC returning organizer notes to organizer roles, NULL otherwise |
 
+## Roster and privilege functions (migrations 38 and 39)
+
+| Function | Purpose |
+| --- | --- |
+| `public.record_participant_handicap(actor, participant, value, source, effective_from, source_reference)` | Records a handicap revision, closing the interval it supersedes in the same statement. Same-day changes correct the open row; an earlier date back-fills and is bounded by the interval that follows. Service-role only — the actor is a parameter, so `catalog-admin` proves the caller's identity from their JWT before passing it |
+
+Migration 38 restates the browser Data API privileges explicitly instead of
+inheriting whatever the Supabase CLI's stack grants by default. The grant lists
+are unchanged from migration 13: the same `authenticated` read allow-list, the
+same column-limited `participants` read that keeps organizer notes behind
+`participant_organizer_notes`, and the same `anon` spectator surface, which is
+reachable only for a published event whose visibility is `public` because
+`app.can_read_event` says so. RLS remains the row boundary; every write still
+goes through an authorized RPC or Edge Function.
+
+## Generated types
+
+`packages/contracts/src/database.types.ts` is generated from the applied
+migrations by `npm run db:types` and checked in. CI regenerates it against a
+freshly migrated database and fails when the committed file does not match, so
+a schema change that skipped the regeneration step cannot merge. The file
+documents row shapes only — a column appearing there says nothing about who may
+read it, which is decided by RLS and the grants above.
+
 ## State machines and guards (migration 10)
 
 - `app.enforce_event_transition()` implements the Appendix B graph exactly;

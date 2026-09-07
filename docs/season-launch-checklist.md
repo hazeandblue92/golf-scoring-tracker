@@ -14,6 +14,15 @@ Record the event, date, operator, and evidence links with this checklist.
 - [ ] Paper scorecards, group list, rules summary, and incident contacts are ready.
 - [ ] No payment method is attached to the free-tier vendors.
 
+## Roster and accounts
+
+- [ ] The roster is current: every player who is playing is **active**, and
+      anyone who has stopped is **inactive** rather than deleted.
+- [ ] Every net competitor has a handicap whose effective date covers the event
+      date, with its source recorded.
+- [ ] Every player who needs to sign in has an account, and anyone who should
+      no longer have access has been disabled.
+
 ## 24–48 hours before each event
 
 - [ ] Supabase is active; production deployment and required workflows are green.

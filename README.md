@@ -19,12 +19,15 @@ npm run backend:seed   # reset DB, apply migrations + seed
 npm run bootstrap:owner -- --help  # one-time first owner (see runbook)
 npm run web:start      # Vite dev server for apps/web
 npm test               # unit + property + golden vector suites
+npm run test:coverage  # the same suites with the scoring coverage gate
 npm run build          # production web-app build
 npm run test:integration     # database, Edge Function, and RLS checks
 npm run test:e2e             # Chromium, Firefox, WebKit, and Pixel 7 matrix
 npm run test:bundle-budget   # enforce the 250 KiB initial JS limit
 npm run test:security        # verify CSP/headers and scan bundles/source/artifacts
 npm run test:licenses        # enforce the reviewed dependency license list
+npm run test:operations      # backup/maintenance connection configuration
+npm run db:types             # regenerate contracts/src/database.types.ts (-- --check in CI)
 npm run verify:deployment -- https://<host>   # check a deployed origin's headers and caching
 ```
 

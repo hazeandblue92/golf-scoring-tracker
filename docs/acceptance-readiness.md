@@ -12,7 +12,7 @@ as a manual or production pass.
 | Criterion | Status | Evidence and remaining gate |
 | --- | --- | --- |
 | AC-001 | Partial | RLS tests prove the temporary-password flag blocks mutation until activation; `tests/e2e/phase1.spec.ts` completes the first-sign-in, privacy acceptance, password replacement, old-password rejection, and new-password sign-in journey in every automated browser profile. MFA integration/browser tests prove an AAL1 organizer is rejected and an enrolled, challenged TOTP session can use privileged workflows. Recovery access for real directors remains a §26 launch drill. |
-| AC-002 | Demonstrated | `tests/integration/test/phase1-workflow.test.ts` and `tests/e2e/phase1.spec.ts` create and publish through supported application paths. |
+| AC-002 | Demonstrated | `tests/integration/test/phase1-workflow.test.ts` and `tests/e2e/phase1.spec.ts` create and publish through supported application paths. Roster administration — CSV import with a server-side dry run, handicap revisions, roster status, seasons, account disable/reactivate/reset, and starting an event from a previous one — is covered by `tests/integration/test/roster-administration.test.ts` and two browser journeys, so a season no longer needs a developer or a database console. |
 | AC-003 | Demonstrated | `tests/integration/test/phase1-workflow.test.ts` changes catalog course, tee, hole, roster, and handicap sources, proves frozen rows/projections do not move, and verifies published handicap/rule edits are denied. |
 | AC-004 | Demonstrated | `tests/e2e/phase1.spec.ts` proves a player reaches their assigned active scorecard within three interactions after sign-in on desktop Chromium, Firefox, WebKit, and mobile Chromium. Physical-phone usability remains part of the device launch drill, not this automated interaction gate. |
 | AC-005 | Demonstrated | `tests/integration/test/rls-security.test.ts` covers assigned, self, unassigned, unauthenticated, locked-event, and direct-table paths with real JWTs and service-side ground truth. `tests/integration/test/scoring-permission-origins.test.ts` proves each grant records its origin, so reloading a draft cannot promote an automatic same-group grant into a field-wide one. |
@@ -34,23 +34,29 @@ as a manual or production pass.
 | AC-SEC-001 | Demonstrated | `tests/integration/test/rls-security.test.ts` covers event/role boundaries and direct-table attacks; `tests/integration/test/cross-league-security.test.ts` uses an isolated second league to prove its league, roster, event, notes, and privileged workflows remain inaccessible. |
 | AC-SEC-002 | Partial | `npm run test:security` detects Supabase privileged keys/JWTs, credentialed DB URLs, Cloudflare tokens, VAPID/private keys, and literal privileged environment values across browser bundles, tracked files, and likely log/export/environment artifacts without printing matches. It does not scan Git history or files outside the checkout; run provider history scanning and separately inspect production logs and generated exports. |
 | AC-SEC-003 | Partial | `npm run test:security` compares source and built headers/CSP, rejects unsafe or local production origins, and scans every built JavaScript bundle. `npm run verify:deployment -- <url>` checks the same policy against a live origin, plus shell/asset caching and the SPA fallback, and the `Deploy` workflow runs it after every deployment. Retain one passing run against the release deployment. |
-| AC-SEC-004 | Demonstrated | Integration tests prove a retained, unexpired JWT loses mutation access immediately after profile disablement; account administration retains the profile/audit identity. Complete one production session-revocation drill. |
+| AC-SEC-004 | Demonstrated | Integration tests prove a retained, unexpired JWT loses mutation access immediately after profile disablement; account administration retains the profile/audit identity. The roster screen now exposes disable, reactivate, and reset, so the production session-revocation drill has an interface to run through; complete and record it. |
 | AC-COST-001 | Manual/deployment | Owner must record that Supabase, Cloudflare Pages, and public-repository Actions are on Free plans, use the generated `pages.dev` host, and have no payment method attached. |
 | AC-COST-002 | Manual/deployment | The repository has no required email/SMS or paid API flow. Owner must confirm production vendor configuration introduces none. |
 | AC-COST-003 | Partial | Operations exposes measured database thresholds, manual vendor quota checks, and stop-first guidance. Vendor dashboards remain a required operator review. |
 | AC-COST-004 | Demonstrated | `npm run test:licenses` fails on any shipped dependency outside the reviewed allow-list. |
 | AC-COST-005 | Partial | Portable export, integrity hashing, restore ordering, and restore tooling exist. Complete and record a clean local/self-hosted restore including migrations, RLS, projection rebuild, and final-hash comparison. |
-| AC-A11Y-001 | Partial | Playwright/axe and reflow automation cover core surfaces, and the whole suite now runs green across chromium, firefox, webkit, and the Pixel 7 profile. Complete every Due row in `docs/accessibility-audit.md` and `docs/supported-device-matrix.md`; the amended score-entry surfaces (hole strip, sunlight mode, bulk par) still need their manual contrast and zoom checks. |
+| AC-A11Y-001 | Partial | Playwright/axe and reflow automation cover core surfaces, and all 44 journeys run green across chromium, firefox, webkit, and the Pixel 7 profile — including the new roster and templating surfaces, where the Pixel 7 run caught a scrollable region with no keyboard access that the desktop profiles could not see. Complete every Due row in `docs/accessibility-audit.md` and `docs/supported-device-matrix.md`; the amended score-entry surfaces (hole strip, sunlight mode, bulk par) still need their manual contrast and zoom checks. |
 | AC-A11Y-002 | Partial | Sync states use text/status semantics and automated accessibility checks. VoiceOver/TalkBack announcement cadence and field-error perception remain manual gates. |
 | AC-PERF-001 | Partial | CI enforces the bundle budget; the local supported-load profile passed. Production load, interaction responsiveness, and physical-device field evidence remain due. |
 
 ## Deployment
 
 The first hosted deployment was released on 2026-08-27 at
-`https://golfsc2man.pages.dev`. The 2026-09-07 audit verified deployed headers,
-but found the Supabase backend unavailable; a fresh Management API check on
-2026-09-07 confirms the original project exists with status `INACTIVE`.
-Restoration, authenticated health, and production acceptance remain open.
+`https://golfsc2man.pages.dev`. The 2026-09-07 audit verified deployed headers
+but found the Supabase backend unreachable: the free project had paused after
+inactivity, which is the §21.2 failure mode the specification names. The owner
+has restored it, and the public health summary answers 200 `ok`. A scheduled
+check now polls that endpoint every other day so a quiet fortnight between
+events cannot repeat it.
+
+Migrations 38 and 39 have not been applied to the hosted project, and the
+deployed Edge Functions still report the previous schema version. Applying
+them, redeploying, and confirming the authenticated health body remain open.
 `docs/runbooks/deployment.md` records the release order: dry-run and apply
 migrations, then deploy Edge Functions and the web app. A live static origin
 alone does not close production capacity, recovery, or vendor-plan gates.
@@ -81,9 +87,13 @@ requires an explicit product decision and specification update.
 
 - Clean `npm ci`, type checks, unit/property/golden, integration, browser/axe,
   build, lint, bundle, security, and license runs, plus a retained coverage
-  report meeting the scoring thresholds.
+  report meeting the scoring thresholds. **All green as of 2026-09-07**, with
+  coverage at 95.99% branches against the 95% gate; CI runs the coverage gate
+  and retains the report, which it had never done before.
 - Generated database types checked against the release schema and a reviewed
   RLS policy map if the data dictionary no longer matches the migrations.
+  **Present**: `packages/contracts/src/database.types.ts` is committed and CI
+  fails when regenerating it against the migrations produces a diff.
 - Clean-stack portable restore report and production encrypted-backup restore
   drill, including RLS and result comparison—not checksum alone.
 - Production capacity report, deployed CSP/header check, physical device and
