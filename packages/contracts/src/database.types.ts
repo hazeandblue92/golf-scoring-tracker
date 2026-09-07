@@ -2652,6 +2652,17 @@ export type Database = {
         Args: { p_event_id: string; p_result: Json; p_revision: number }
         Returns: Json
       }
+      record_participant_handicap: {
+        Args: {
+          p_actor: string
+          p_effective_from?: string
+          p_participant_id: string
+          p_source: Database["public"]["Enums"]["handicap_source"]
+          p_source_reference?: string
+          p_value: number
+        }
+        Returns: Json
+      }
       record_phase4_error: {
         Args: {
           p_correlation_id: string
