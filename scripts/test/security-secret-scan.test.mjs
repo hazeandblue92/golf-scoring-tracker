@@ -85,3 +85,24 @@ test('allows documented placeholders and the exact fixed local-stack key only in
     scope: 'repository',
   }), ['Supabase secret key']);
 });
+
+test('permits a code reference as a value but never a bare opaque token', () => {
+  // Real code assigns these names from variables. Flagging that taught people
+  // to obfuscate the assignment to get past the scanner, which is worse than
+  // the finding: `SUPABASE_` + `DB_URL` in production code hides it from the
+  // next reader too.
+  assert.deepEqual(labels([
+    'SUPABASE_' + 'DB_URL: dbUrl.href }',
+    'SUPABASE_' + 'DB_URL: value }))',
+    'CLOUDFLARE_' + 'API_TOKEN = env.get("CLOUDFLARE_API_TOKEN")',
+  ].join('\n')), []);
+
+  // The loosening must not reach a credential that merely looks like an
+  // identifier. Cloudflare tokens are 40 alphanumeric characters.
+  assert.deepEqual(labels('CLOUDFLARE_' + `API_TOKEN=${'c'.repeat(40)}`), [
+    'literal privileged environment value',
+  ]);
+  assert.deepEqual(labels('SUPABASE_' + `SERVICE_ROLE_KEY: ${'k'.repeat(32)}`), [
+    'literal privileged environment value',
+  ]);
+});

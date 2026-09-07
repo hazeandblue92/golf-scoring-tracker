@@ -5,7 +5,7 @@ import { operationsConfig } from '../lib/operations-config.mjs'
 const parts = {
   SUPABASE_DB_HOST: 'db.example.test',
   SUPABASE_DB_USER: 'postgres.example',
-  SUPABASE_DB_PASSWORD: 'test:@/?#% value',
+  SUPABASE_DB_PASSWORD: 'not-a-secret:@/?#% value',
 }
 
 test('encodes credentials and requires TLS without leaking them in errors', () => {
@@ -18,18 +18,18 @@ test('encodes credentials and requires TLS without leaking them in errors', () =
 })
 
 test('rejects incomplete URLs and malformed hosts before invoking PostgreSQL', () => {
-  for (const value of ['', 'postgresql:///postgres', 'https://user:pass@db.test/db', 'secret string']) {
+  for (const value of ['', 'postgresql:///postgres', 'https://user:not-a-secret@db.example/db', 'secret string']) {
     assert.throws(() => operationsConfig({ SUPABASE_DB_URL: value }))
   }
   assert.throws(() => operationsConfig({ ...parts, SUPABASE_DB_HOST: 'db.test/other' }))
-  assert.throws(() => operationsConfig({ ...parts, SUPABASE_DB_PASSWORD: 'value\nOTHER=x' }))
+  assert.throws(() => operationsConfig({ ...parts, SUPABASE_DB_PASSWORD: 'not-a-secret\nOTHER=x' }))
 })
 
 test('supports a complete legacy URL and validates all backup prerequisites', () => {
   const env = {
-    SUPABASE_DB_URL: 'postgresql://user:pass@db.test/postgres?sslmode=disable',
+    SUPABASE_DB_URL: 'postgresql://user:not-a-secret@db.example/postgres?sslmode=disable',
     SUPABASE_URL: 'https://project.supabase.co',
-    SUPABASE_SERVICE_ROLE_KEY: 'test-only',
+    SUPABASE_SERVICE_ROLE_KEY: 'not-a-secret',
     AGE_BACKUP_RECIPIENT: `age1${'q'.repeat(58)}`,
   }
   assert.equal(new URL(operationsConfig(env).SUPABASE_DB_URL).searchParams.get('sslmode'), 'require')

@@ -67,17 +67,41 @@ function decodeJwtPayload(token) {
   }
 }
 
+/**
+ * Strip the surrounding code from a captured assignment value. The capture runs
+ * to end of line, so an assignment written inside an object literal or a call
+ * arrives with the brackets that closed them: `x.y }))`. Closers are dropped
+ * only while they are unbalanced, so a genuine call expression keeps its own.
+ */
+function trimEnclosingSyntax(rawValue) {
+  let value = rawValue.trim().replace(/^["']|["'`,;\\]+$/g, '').trim();
+  for (;;) {
+    const last = value.at(-1);
+    if (last !== ')' && last !== '}') break;
+    const open = (value.match(last === ')' ? /\(/g : /\{/g) ?? []).length;
+    const close = (value.match(last === ')' ? /\)/g : /\}/g) ?? []).length;
+    if (close <= open) break;
+    value = value.slice(0, -1).trim().replace(/[,;]+$/, '').trim();
+  }
+  return value;
+}
+
 function isPlaceholder(rawValue) {
-  const value = rawValue
-    .trim()
-    .replace(/^["']|["'`,;\\]+$/g, '')
-    .trim();
+  const value = trimEnclosingSyntax(rawValue);
   if (value === '') return true;
   if (/^(?:\$\{\{|\$\{|\$|process\.env\.|Deno\.env\.|import\.meta\.env\.)/.test(value)) {
     return true;
   }
   if (/^(?:string|number|boolean|unknown|never)(?:\s|$)/.test(value)) return true;
   if (/^(?:\.{3}(?:\s|$)|<[^>]+>|\[[^\]]+\])/.test(value)) return true;
+  // An unquoted property access or call is a reference to a value, not a value.
+  // Assigning a privileged name from `someUrl.href` carries no secret, and
+  // flagging it teaches people to work around the scanner rather than read it.
+  if (/^[A-Za-z_$][\w$]*(?:\??\.[\w$]+|\[[^\]]*\]|\([^)]*\))+$/.test(value)) return true;
+  // A bare identifier is only a reference when it is short and lower-camel: a
+  // long opaque token is exactly the shape a real credential has, and one of
+  // those must never pass merely because it happens to be alphanumeric.
+  if (/^[a-z_$][\w$]{0,19}$/.test(value)) return true;
   return /(?:example|placeholder|redacted|replace[-_ ]?me|change[-_ ]?me|your[-_]|server[-_ ]?only|local[-_]|not[-_ ]?a[-_ ]?secret)/i
     .test(value);
 }

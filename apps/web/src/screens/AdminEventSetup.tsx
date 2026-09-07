@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 
 import { publishEvent, saveEventDraft } from '../lib/phase1.ts';
 import { relationValue } from '../lib/row-display.ts';
@@ -24,7 +24,18 @@ type HandicapRecord = {
 
 export function AdminEventSetup() {
   const { eventId: routeEventId = 'new' } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  /**
+   * §3.2: "create an event from blank or template". The league plays the same
+   * throwdown repeatedly, so the template that matters is the last event —
+   * its field, teams, flights, tee, and format, with a fresh name and date.
+   *
+   * A template only seeds the setup reads. The events row stays null, so
+   * saving creates a new draft; the source event is never touched, and its
+   * published snapshot cannot be affected by what happens here.
+   */
+  const templateId = routeEventId === 'new' ? searchParams.get('from') : null;
   const [draftEventId, setDraftEventId] = useState(routeEventId === 'new' ? null : routeEventId);
   const [isDirty, setIsDirty] = useState(routeEventId === 'new');
   const [submitting, setSubmitting] = useState(false);
@@ -48,10 +59,10 @@ export function AdminEventSetup() {
     setSelectedStartsAt(null);
     setMessage(null);
     setError(null);
-  }, [routeEventId]);
+  }, [routeEventId, templateId]);
 
   const query = useQuery({
-    queryKey: ['event-builder', routeEventId],
+    queryKey: ['event-builder', routeEventId, templateId],
     queryFn: async () => {
       const supabase = getSupabaseClient();
       const [{ data: roles }, { data: leagues }] = await Promise.all([
@@ -75,13 +86,16 @@ export function AdminEventSetup() {
       let existingFlights: FlightDraft[] = [];
       let existingScorerProfileIds: string[] = [];
       let legacyScorerCount = 0;
-      if (routeEventId !== 'new') {
+      // Setup reads follow the template when creating from one; identity
+      // (name, dates, visibility) deliberately does not.
+      const setupSourceId = templateId ?? (routeEventId === 'new' ? null : routeEventId);
+      if (setupSourceId !== null) {
         const [roundResult, entryResult, teamResult, flightResult, markerResult] = await Promise.all([
-          supabase.from('rounds').select('id,source_tee_set_id').eq('event_id', routeEventId).order('round_number'),
-          supabase.from('event_entries').select('participant_id,flight_id').eq('event_id', routeEventId),
-          supabase.from('event_teams').select('id,name,event_team_members(position,event_entries(participant_id))').eq('event_id', routeEventId).order('created_at'),
-          supabase.from('flights').select('id,name,sort_order').eq('event_id', routeEventId).order('sort_order'),
-          supabase.from('scoring_permissions').select('scorer_profile_id,grant_origin').eq('event_id', routeEventId).eq('permission_type', 'marker').is('valid_to', null),
+          supabase.from('rounds').select('id,source_tee_set_id').eq('event_id', setupSourceId).order('round_number'),
+          supabase.from('event_entries').select('participant_id,flight_id').eq('event_id', setupSourceId),
+          supabase.from('event_teams').select('id,name,event_team_members(position,event_entries(participant_id))').eq('event_id', setupSourceId).order('created_at'),
+          supabase.from('flights').select('id,name,sort_order').eq('event_id', setupSourceId).order('sort_order'),
+          supabase.from('scoring_permissions').select('scorer_profile_id,grant_origin').eq('event_id', setupSourceId).eq('permission_type', 'marker').is('valid_to', null),
         ]);
         const setupError = roundResult.error ?? entryResult.error ?? teamResult.error ?? flightResult.error ?? markerResult.error;
         if (setupError) throw setupError;
@@ -101,7 +115,11 @@ export function AdminEventSetup() {
             .map((member) => relationValue(member.event_entries)?.participant_id ?? ''),
         })).filter((team) => team.participantIds.length >= 2 && team.participantIds.length <= 4 && team.participantIds.every(Boolean));
         existingFlights = (flights ?? []).map((flight) => ({
-          id: flight.id,
+          // A template's flight ids belong to the source event. Carrying them
+          // into a new event would send set_event_flights an id it cannot
+          // update (it scopes updates to the event) and cannot insert either,
+          // because the primary key is taken — the save would fail outright.
+          ...(templateId === null ? { id: flight.id } : {}),
           name: flight.name,
           participantIds: (entries ?? [])
             .filter((entry) => entry.flight_id === flight.id)
@@ -122,8 +140,19 @@ export function AdminEventSetup() {
             .map((permission) => permission.scorer_profile_id),
         ).size;
       }
+      // Candidate templates: this league's most recent events, whatever their
+      // status. A draft is as good a starting point as a finalized event.
+      const { data: recentEvents } = routeEventId === 'new'
+        ? await supabase
+            .from('events')
+            .select('id,name,starts_at,status')
+            .eq('league_id', leagueId)
+            .order('starts_at', { ascending: false })
+            .limit(10)
+        : { data: null };
+
       const teeSets = (courses ?? []).flatMap((course) => course.course_layouts.flatMap((layout) => layout.tee_sets.filter((tee) => tee.status === 'active').map((tee) => ({ ...tee, label: `${course.name} · ${layout.name} · ${tee.name}` }))));
-      return { leagueId, league: leagues?.find((league) => league.id === leagueId), seasons: seasons ?? [], participants: participants ?? [], teeSets, existing, round, entryParticipantIds, existingTeams, existingFlights, existingScorerProfileIds, legacyScorerCount };
+      return { leagueId, league: leagues?.find((league) => league.id === leagueId), seasons: seasons ?? [], participants: participants ?? [], teeSets, existing, round, entryParticipantIds, existingTeams, existingFlights, existingScorerProfileIds, legacyScorerCount, recentEvents: recentEvents ?? [] };
     },
   });
 
@@ -390,6 +419,31 @@ export function AdminEventSetup() {
             <span>1</span>
             <div><h2>Event basics</h2><p>Name the day and set the scoring window.</p></div>
           </div>
+          {routeEventId === 'new' && data.recentEvents.length > 0 && (
+            <div className="field field--wide event-template">
+              <label htmlFor="event-template">Start from a previous event</label>
+              <select
+                id="event-template"
+                value={templateId ?? ''}
+                onChange={(change) => {
+                  const value = change.target.value;
+                  setSearchParams(value === '' ? {} : { from: value }, { replace: true });
+                }}
+              >
+                <option value="">Blank event</option>
+                {data.recentEvents.map((event) => (
+                  <option key={event.id} value={event.id}>
+                    {event.name} · {new Date(event.starts_at).toLocaleDateString()}
+                  </option>
+                ))}
+              </select>
+              <small>
+                {templateId === null
+                  ? 'Copies its field, teams, flights, tee, and format. The date and name stay yours to set.'
+                  : 'Field, teams, flights, tee, and format copied. The event you copied is not changed.'}
+              </small>
+            </div>
+          )}
           <div className="form-grid">
             <div className="field field--wide"><label htmlFor="event-name">Event name</label><input id="event-name" name="name" defaultValue={existing?.name ?? ''} required minLength={3} maxLength={100} /></div>
             <div className="field">

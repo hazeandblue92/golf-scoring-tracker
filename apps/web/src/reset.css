@@ -489,6 +489,8 @@ small { color: var(--muted); }
 .account-actions .field { flex: 1 1 12rem; }
 .account-actions p { margin: 0; flex-basis: 100%; }
 
+.event-template { margin-bottom: 1.25rem; padding: 0.9rem 1rem; background: var(--paper); border-radius: 12px; }
+
 .import-report { margin-top: 1.25rem; display: grid; gap: 0.85rem; }
 .import-report h3 { margin: 0; font-size: 0.95rem; }
 /* Severity carries a word and a border, never colour alone (§18). */

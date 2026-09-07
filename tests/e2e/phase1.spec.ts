@@ -899,3 +899,69 @@ test('organizer imports a roster from CSV, then revises a handicap and an accoun
   await expectAccessible(page);
   await expectNarrowReflow(page);
 });
+
+/**
+ * §3.2: "create an event from blank or template". The league plays the same
+ * two-man throwdown repeatedly, so the useful template is the last event — its
+ * field, teams, flights, tee, and format — with a fresh name and date. The
+ * source event must come through untouched: it is frozen, and its published
+ * snapshot decides results that already exist.
+ */
+test('organizer starts a new event from a previous one without disturbing it', async ({ page }) => {
+  await buildScoringFixture({ playerCount: 4 });
+  const service = serviceClient();
+
+  // The league owner, not an event director: creating a new event is an
+  // owner/league-admin action, and a director's grant is event-scoped.
+  await signInOrganizer(page);
+  await page.goto('/admin/events/new/setup');
+  await expect(page.getByRole('heading', { name: 'Event basics' })).toBeVisible();
+
+  // The picker offers the ten most recent events and this league has many by
+  // now, several of them empty drafts from other journeys. Copy one that
+  // actually has a field, so the assertions are about templating rather than
+  // about which event happened to sort first.
+  const template = page.getByLabel('Start from a previous event');
+  const offered = (await template.locator('option').evaluateAll((options) =>
+    options.map((option) => (option as HTMLOptionElement).value).filter(Boolean)));
+  expect(offered.length).toBeGreaterThan(0);
+  const { data: populated } = await service
+    .from('event_entries').select('event_id').in('event_id', offered);
+  const sourceId = offered.find((id) => (populated ?? []).some((entry) => entry.event_id === id));
+  expect(sourceId, 'at least one offered event must have a field to copy').toBeTruthy();
+
+  const { data: sourceBefore } = await service
+    .from('events').select('name, status, starts_at').eq('id', sourceId as string).single();
+  const { data: entriesBefore } = await service
+    .from('event_entries').select('participant_id').eq('event_id', sourceId as string);
+  await template.selectOption(sourceId as string);
+  await expect(page.getByText('Field, teams, flights, tee, and format copied.')).toBeVisible();
+
+  // The copied setup arrives; identity does not.
+  await expect(page.getByLabel('Event name')).toHaveValue('');
+  await expectAccessible(page);
+
+  const newName = `E2E From Template ${randomUUID().slice(0, 6)}`;
+  await page.getByLabel('Event name').fill(newName);
+  // Gross, because the copied field's handicaps are effective for the source
+  // event's date rather than a week out — the builder is right to block a net
+  // save until they are reviewed (§6.3), and that is not what this test is for.
+  await page.getByLabel('Competition preset').selectOption('individual_gross');
+  await page.getByRole('button', { name: 'Save draft' }).click();
+  await expect(page.getByText(/Draft saved/)).toBeVisible({ timeout: 30_000 });
+
+  // A second event now exists, and the one it was copied from is unchanged.
+  const { data: created } = await service
+    .from('events').select('id, status').eq('name', newName).single();
+  expect(created?.id).toBeTruthy();
+  expect(created?.id).not.toBe(sourceId);
+  const { data: copiedEntries } = await service
+    .from('event_entries').select('participant_id').eq('event_id', created?.id as string);
+  expect(copiedEntries).toHaveLength(entriesBefore?.length ?? 0);
+  expect(copiedEntries?.map((entry) => entry.participant_id).toSorted())
+    .toEqual(entriesBefore?.map((entry) => entry.participant_id).toSorted());
+
+  const { data: sourceAfter } = await service
+    .from('events').select('name, status, starts_at').eq('id', sourceId as string).single();
+  expect(sourceAfter).toEqual(sourceBefore);
+});
