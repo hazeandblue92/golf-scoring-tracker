@@ -658,8 +658,16 @@ export function LeaguePlayers() {
                   ))}
                 </ul>
               )}
+              {/* The plan table scrolls sideways on a phone, so it carries a tab
+                  stop and a name: without one, a keyboard user cannot reach the
+                  columns past the right edge (WCAG 2.1.1). */}
               {report.plan.length > 0 && (
-                <div className="table-scroll">
+                <div
+                  className="table-scroll"
+                  tabIndex={0}
+                  role="region"
+                  aria-label="Import plan, scroll horizontally for all columns"
+                >
                   <table className="import-plan">
                     <thead>
                       <tr>

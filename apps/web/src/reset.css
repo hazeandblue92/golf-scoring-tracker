@@ -497,7 +497,7 @@ small { color: var(--muted); }
 .issue-list { margin: 0; padding-left: 1.1rem; display: grid; gap: 0.4rem; font-size: 0.85rem; }
 .issue-list li { color: var(--muted); }
 .issue-list--error li { color: #701b16; }
-.table-scroll { overflow-x: auto; }
+.table-scroll { width: 100%; min-width: 0; max-width: 100%; display: block; overflow-x: auto; contain: inline-size; -webkit-overflow-scrolling: touch; }
 .import-plan { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 .import-plan th, .import-plan td { padding: 0.5rem 0.6rem; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .import-plan th { color: var(--muted); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; }
