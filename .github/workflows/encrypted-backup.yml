@@ -39,7 +39,18 @@ jobs:
       - name: Choose the backup working directory
         run: echo "BACKUP_DIR=$RUNNER_TEMP/gtt-encrypted-backup" >> "$GITHUB_ENV"
       - name: Install PostgreSQL client and age
-        run: sudo apt-get update && sudo apt-get install --yes postgresql-client age
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes ca-certificates curl age
+          sudo install -d -m 0755 /etc/apt/keyrings
+          curl --fail --silent --show-error https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /etc/apt/keyrings/postgresql.asc >/dev/null
+          echo "deb [signed-by=/etc/apt/keyrings/postgresql.asc] http://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo \"$VERSION_CODENAME\")-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client-17
+          pg_dump --version
       - name: Record backup start
         id: record
         run: echo "id=$(node scripts/record-backup-run.mjs start)" >> "$GITHUB_OUTPUT"
