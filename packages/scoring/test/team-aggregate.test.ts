@@ -108,3 +108,15 @@ describe('team aggregate (spec §8.4)', () => {
     })).toThrow(/expected 3/)
   })
 })
+
+it('rejects nonpositive/fractional team rules and duplicate team identities', () => {
+  for (const teamSize of [0, 1.5]) {
+    expect(() => calculateTeamAggregate({ holes, metric: 'gross', teamSize, bestK: 1, teams: [], phase: 'final' })).toThrow(/teamSize/)
+  }
+  for (const bestK of [0, 1.5]) {
+    expect(() => calculateTeamAggregate({ holes, metric: 'gross', teamSize: 4, bestK, teams: [], phase: 'final' })).toThrow(/bestK/)
+  }
+  const teams = fourPlayerTeams()
+  teams[0]!.members[1] = teams[0]!.members[0]!
+  expect(() => calculateTeamAggregate({ holes, metric: 'gross', teamSize: 4, bestK: 4, teams, phase: 'final' })).toThrow(/duplicate/)
+})

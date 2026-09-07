@@ -30,7 +30,17 @@ jobs:
       - name: Type check Edge Functions (§12, §16.3)
         run: npm run typecheck:functions
       - name: Unit and property tests (§16.3)
-        run: npx vitest run
+        run: npm run test:coverage
+      - name: Retain scoring coverage evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scoring-coverage
+          path: coverage/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Operations configuration tests
+        run: npm run test:operations
       - name: Production web build (§16.3)
         run: npm run build --workspace apps/web --if-present
       - name: Initial JavaScript budget (§19.1)

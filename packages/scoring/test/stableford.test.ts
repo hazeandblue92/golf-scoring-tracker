@@ -357,3 +357,40 @@ describe('entity status and warnings (spec §7.3, §20.2)', () => {
     expect(row(result, 'B')).toMatchObject({ rank: 1, isTied: true })
   })
 })
+
+describe('Stableford input boundaries and revision history', () => {
+  it.each([
+    { floorPoints: 0.5, pointsByRelation: { 0: 2 } },
+    { floorPoints: 0, pointsByRelation: { '0.5': 2 } },
+    { floorPoints: 0, pointsByRelation: { 0: 1.5 } },
+  ])('rejects noninteger scoring rules: %j', (rules) => {
+    expect(() => calculateStableford({ holes: holesN(1), metric: 'gross', rules, entries: [], phase: 'final' })).toThrow(RangeError)
+  })
+  it('uses the highest revision regardless of history order', () => {
+    const result = calculateStableford({
+      holes: holesN(1), metric: 'gross', rules: STANDARD, phase: 'final',
+      entries: [entry('A', null, [
+        complete('h1', 7), { ...complete('h1', 3), revision: 3 },
+        { ...complete('h1', 5), revision: 2 },
+      ])],
+    })
+    expect(row(result, 'A').points).toBe(3)
+  })
+  it('keeps terminal entities unranked even with missing handicaps or unreturned holes', () => {
+    for (const metric of ['net', 'gross'] as const) {
+      const result = calculateStableford({
+        holes: holesN(1), metric, rules: STANDARD, phase: 'final',
+        entries: [entry('A', null, [terminal('h1', 'not_started')], 'disqualified')],
+      })
+      expect(row(result, 'A')).toMatchObject({ rank: null, provisional: false, status: 'disqualified', thru: 0 })
+      expect(holePoints(result, 'A', 'h1').points).toBeNull()
+    }
+  })
+  it('does not award points for a hole-level withdrawal or disqualification', () => {
+    for (const status of ['withdrawn', 'disqualified'] as const) {
+      const result = calculateStableford({ holes: holesN(1), metric: 'gross', rules: STANDARD,
+        phase: 'final', entries: [entry('A', null, [terminal('h1', status)])] })
+      expect(holePoints(result, 'A', 'h1')).toMatchObject({ points: null, provisional: false })
+    }
+  })
+})
