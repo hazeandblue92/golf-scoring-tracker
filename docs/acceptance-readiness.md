@@ -46,12 +46,14 @@ as a manual or production pass.
 
 ## Deployment
 
-Nothing has been deployed yet. `docs/runbooks/deployment.md` holds the vendor
-setup, the required repository variables and secrets, and the release order —
-migrations first, then Edge Functions and the web app. Both workflows are
-manual; the migration workflow dry-runs by default. Until a deployment exists,
-every row above that names a deployed URL, a production capacity run, or a
-vendor plan confirmation stays open regardless of how green local automation is.
+The first hosted deployment was released on 2026-08-27 at
+`https://golfsc2man.pages.dev`. The 2026-09-07 audit verified deployed headers,
+but found the Supabase backend unavailable; a fresh Management API check on
+2026-09-07 confirms the original project exists with status `INACTIVE`.
+Restoration, authenticated health, and production acceptance remain open.
+`docs/runbooks/deployment.md` records the release order: dry-run and apply
+migrations, then deploy Edge Functions and the web app. A live static origin
+alone does not close production capacity, recovery, or vendor-plan gates.
 
 ## §24 zero-cost release gates
 

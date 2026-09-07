@@ -18,7 +18,10 @@ jobs:
     timeout-minutes: 20
     env:
       SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_DB_HOST: ${{ vars.SUPABASE_DB_HOST }}
+      SUPABASE_DB_USER: ${{ vars.SUPABASE_DB_USER }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL || vars.VITE_SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       AGE_BACKUP_RECIPIENT: ${{ secrets.AGE_BACKUP_RECIPIENT }}
       BACKUP_WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -27,6 +30,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - name: Validate operations configuration
+        run: node scripts/lib/operations-config.mjs --backup
       # The `runner` context does not exist in a job-level `env:` — only inside
       # steps — and referencing it there makes GitHub reject the whole file, so
       # this workflow never ran at all. RUNNER_TEMP is the plain environment
@@ -76,3 +81,6 @@ jobs:
       - name: Record backup failure
         if: ${{ failure() && steps.record.outputs.id != '' }}
         run: node scripts/record-backup-run.mjs finish "${{ steps.record.outputs.id }}" failed
+      - name: Remove plaintext backup files even after failure
+        if: always()
+        run: rm -f "$BACKUP_DIR/database.dump" "$BACKUP_DIR/backup.tar.gz"

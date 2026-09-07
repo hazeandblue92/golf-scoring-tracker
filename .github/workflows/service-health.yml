@@ -1,0 +1,31 @@
+name: Hosted service health
+
+# Free Supabase projects pause after roughly a week of inactivity, and a paused
+# project takes the deployed app down with it (§21.2, §24.1). A weekly ping sits
+# exactly on that boundary, so this runs every other day: the check doubles as
+# the keep-alive, because `health` reads the database and the auth admin API.
+on:
+  schedule:
+    - cron: '23 12 */2 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-service-health
+  cancel-in-progress: false
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Check database and authentication health
+        run: node scripts/check-service-health.mjs
