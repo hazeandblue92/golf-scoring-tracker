@@ -62,14 +62,30 @@ Every automated gate is green on this branch, verified 2026-09-07:
 | `npm run db:types -- --check` | pass |
 | `npm run test:integration` | pass — 38 files, 216 tests, 3 skipped |
 | `npm run test:e2e` | pass — 44 journeys across Chromium, Firefox, WebKit, Pixel 7 |
+| `npm ci` from the lockfile | pass — the whole battery re-run on a clean install |
+| `npm audit` | 0 vulnerabilities |
 
 Coverage now runs in CI and the report is retained as an artifact; it had never
 run before, which is why the gate sat red and unnoticed. Generated database
 types are committed and CI fails when they drift from the migrations.
 
-The Dependabot blocker is cleared: the CLI upgrade to 2.116 with migration 38
-passes the full integration suite, including the four RLS privilege tests that
-failed on the bump.
+The Dependabot backlog is cleared. Migration 38 unblocked the CLI upgrade that
+had stalled it since 2026-08-13, and everything mergeable was taken and
+verified rather than merged on a green checkmark: the GitHub Actions majors
+(checkout 7, setup-node 7, upload-artifact 7, download-artifact 8, setup-cli 3,
+dependency-review 5), react-router 8.3.1, supabase-js 2.116, Supabase CLI
+2.117, zod 4.5.4 with the Edge `deno.json` pin moved to match, and every
+in-range minor and patch. `cloudflare/wrangler-action` stays on v3 — it is the
+deployment path and there is no way to test a major there short of a real
+deploy. TypeScript stays on 6.0.2 per ADR 0008 and the specification's own
+source register. Initial JavaScript is 216.15 KiB gzip against the 250 KiB
+budget.
+
+The upgrade surfaced a real defect, now fixed: the outbox's score send had no
+timeout, so a request that hung rather than failing left the row in `sending`
+for the life of the document — durable and reported unsynced, but never
+retried until the app was reloaded. It is bounded at twenty seconds and
+requeues like any other network failure (§10.3).
 
 ## Specification gaps closed
 
