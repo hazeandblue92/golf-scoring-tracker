@@ -370,6 +370,24 @@ async function markSynced(row: OutboxRow, serverRevision: number): Promise<void>
   );
 }
 
+/**
+ * Beyond this, a score write that has not answered is treated as a network
+ * failure and retried with backoff.
+ *
+ * A request does not always fail when the network is gone — on a course it far
+ * more often just hangs. Without a bound, the row stays 'sending' for the life
+ * of the document: it is durable, and the banner still reports it unsynced, but
+ * nothing retries it, so a score can sit unsent until the player reloads the
+ * app. §10.3 asks for retry with backoff, and an unbounded wait is neither.
+ *
+ * Twenty seconds rather than the five the cached reads use: a read that stalls
+ * has a cached answer to fall back on, while a write has nowhere to go, and a
+ * slow-but-alive commit is worth waiting for. Retries stay byte-identical under
+ * the same idempotency key, so a request that is answered after the abort
+ * cannot apply twice (§12.5).
+ */
+const SEND_TIMEOUT_MS = 20_000;
+
 async function sendRow(row: OutboxRow, accessToken: string): Promise<OutboxDecision> {
   const { publishableKey } = getSupabaseEnv();
   try {
@@ -381,6 +399,7 @@ async function sendRow(row: OutboxRow, accessToken: string): Promise<OutboxDecis
         apikey: publishableKey,
       },
       body: JSON.stringify(row.mutation),
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
     });
     let body: unknown = null;
     try {
@@ -390,7 +409,9 @@ async function sendRow(row: OutboxRow, accessToken: string): Promise<OutboxDecis
     }
     return decideFromResponse(response.status, body);
   } catch {
-    // Network failure (offline, DNS, aborted): retry with backoff (§10.3).
+    // Network failure (offline, DNS, timed out, aborted): retry with backoff
+    // (§10.3). A timeout arrives here as a TimeoutError, so a stalled request
+    // requeues exactly like a refused one instead of parking the row.
     return { kind: 'retry' };
   }
 }

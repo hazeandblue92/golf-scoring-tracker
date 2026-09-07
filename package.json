@@ -44,7 +44,7 @@
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
     "@playwright/test": "^1.62.1",
-    "@supabase/server": "1.4.1",
+    "@supabase/server": "1.5.3",
     "@supabase/supabase-js": "^2.112.2",
     "@vitest/coverage-v8": "4.1.10",
     "eslint": "^10.8.1",

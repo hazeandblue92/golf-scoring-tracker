@@ -26,8 +26,8 @@ jobs:
       AGE_BACKUP_RECIPIENT: ${{ secrets.AGE_BACKUP_RECIPIENT }}
       BACKUP_WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: Validate operations configuration
@@ -64,7 +64,7 @@ jobs:
           echo "checksum=$checksum" >> "$GITHUB_OUTPUT"
           echo "size=$size" >> "$GITHUB_OUTPUT"
       - name: Upload encrypted artifact and evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: encrypted-database-backup-${{ github.run_id }}
           path: |

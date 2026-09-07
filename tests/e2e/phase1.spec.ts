@@ -643,10 +643,18 @@ test('organizer creates, publishes, scores, finalizes, reopens, and exports a gr
   await page.getByRole('button', { name: 'Next', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Hole 2' })).toBeVisible();
   await expect(page.getByRole('spinbutton').first()).toHaveValue('6');
-  const queuedAfterRefresh = await readOutbox(page);
-  const preserved = queuedAfterRefresh.find((row) =>
-    row.idempotencyKey === queued?.idempotencyKey);
-  expect(preserved?.state).toBe('queued');
+  // The row must survive the reload and still be owed to the server. Poll
+  // rather than sample: an offline send attempt can be in flight at the moment
+  // of the read, and a row passing through 'sending' returns to 'queued' when
+  // the attempt fails. Sampling once turns that transient into a flake, which
+  // is what a newer Playwright's timing exposed.
+  await expect.poll(async () => {
+    const rows = await readOutbox(page);
+    return rows.find((row) => row.idempotencyKey === queued?.idempotencyKey)?.state;
+    // Longer than the outbox's own send timeout: a request that stalls rather
+    // than failing is bounded at 20 seconds, and the row returns to 'queued'
+    // when that fires.
+  }, { timeout: 30_000 }).toBe('queued');
   if (browserName === 'webkit') {
     await setOutboxNextAttemptAt(page, queued!.idempotencyKey, 0);
   } else {
