@@ -38,7 +38,8 @@
     "restore:export": "node scripts/restore-export.mjs",
     "typecheck:functions": "cd supabase/functions && deno check $(ls -d */ | sed \"s#/##\" | while read d; do [ -f \"$d/index.ts\" ] && echo \"$d/index.ts\"; done)",
     "test:coverage": "vitest run --coverage",
-    "test:operations": "node --test scripts/test/operations-config.test.mjs"
+    "test:operations": "node --test scripts/test/operations-config.test.mjs",
+    "db:types": "node scripts/gen-db-types.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",

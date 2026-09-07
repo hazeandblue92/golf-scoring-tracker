@@ -73,6 +73,12 @@ jobs:
           npm run test:bootstrap:fresh
       - name: Apply migrations and seed (§16.3)
         run: npm run backend:seed
+      # Spec §26 requires generated types as a handoff deliverable. Checking
+      # them here — against a database built from the migrations themselves —
+      # is what makes them trustworthy: a schema change that skipped
+      # `npm run db:types` fails before it can merge.
+      - name: Generated database types match the migrations (§26)
+        run: npm run db:types -- --check
       - name: Verify first owner attachment to an existing league
         run: npm run test:bootstrap:existing
       - name: Restore clean integration fixture after one-time bootstrap test
