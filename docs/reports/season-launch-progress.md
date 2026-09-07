@@ -22,11 +22,11 @@ deliberately not committed.
   step that names the missing variable instead of falling through to a runner
   socket. Plaintext dump and tarball are removed with `if: always()`.
 
-**Still owner-only:** generate the age keypair, store the private identity on
-two owner-controlled devices, set `AGE_BACKUP_RECIPIENT`, `SUPABASE_URL`, and
-`SUPABASE_SERVICE_ROLE_KEY`, then run the backup and maintenance workflows and
-retain the evidence. No backup has ever succeeded, so the §26 restore drill
-cannot start until this is done.
+**Still owner-only:** the required GitHub secrets are now present (verified by
+name on 2026-09-07). The private age identity still must be stored on two
+owner-controlled devices, and the backup and maintenance workflows must run
+successfully with retained evidence. No successful backup artifact has yet
+been verified, so the §26 restore drill cannot start until this is done.
 
 ## Schema
 
