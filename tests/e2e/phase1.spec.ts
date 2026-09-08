@@ -607,7 +607,17 @@ test('organizer creates, publishes, scores, finalizes, reopens, and exports a gr
   await page.getByRole('link', { name: 'Enter scores' }).click();
   await expect(page.getByText(/Offline copy from/)).toBeVisible();
   await page.getByRole('button', { name: 'Next', exact: true }).click();
-  await page.getByRole('spinbutton').first().fill('6');
+  // Wait for hole 2 to actually render before typing. Filling during the
+  // transition lands the keystroke on hole 1's input, which still holds 5, so
+  // the field becomes "56" — and the entry screen clamps anything above the
+  // maximum to 25 rather than rejecting it. The result is a passing-looking
+  // save of the wrong score, and a test failure ten lines later that blames
+  // the offline reload. CI caught this on a slower runner; locally it never
+  // lost the race.
+  await expect(page.getByRole('heading', { name: 'Hole 2' })).toBeVisible();
+  const holeTwoScore = page.getByRole('spinbutton').first();
+  await expect(holeTwoScore).toHaveValue('4');
+  await holeTwoScore.fill('6');
   await page.getByRole('button', { name: 'Save hole 2' }).click();
   await expect(page.getByRole('spinbutton').first()).toHaveValue('6');
   await expect(page.getByText('1 score not synced')).toBeVisible();
