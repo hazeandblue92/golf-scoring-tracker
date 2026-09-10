@@ -46,7 +46,7 @@
     "@playwright/test": "^1.62.1",
     "@supabase/server": "1.5.3",
     "@supabase/supabase-js": "^2.112.2",
-    "@vitest/coverage-v8": "4.1.10",
+    "@vitest/coverage-v8": "5.0.0",
     "eslint": "^10.8.1",
     "fast-check": "4.9.0",
     "supabase": "^2.116.0",
