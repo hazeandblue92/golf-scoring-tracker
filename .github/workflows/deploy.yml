@@ -132,7 +132,7 @@ jobs:
       # Cloudflare Pages Free on the generated pages.dev hostname. No custom
       # domain, no paid add-on, no payment method (§24).
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
