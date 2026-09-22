@@ -65,8 +65,7 @@ begin
         where t.event_id=v_event and e.participant_id=any(v_ids) group by t.id;
       -- Throwdown scorers are restricted to their actual copied tee group.
       if p_body->>'competitionPreset' = 'two_person_throwdown' then
-        -- The preset pairs two teams per group; an odd team count leaves one pair alone.
-        if cardinality(v_ids) not in (2, 4) then raise exception 'Throwdown groups require one or two pairs'; end if;
+        if cardinality(v_ids) <> 4 then raise exception 'Throwdown groups require four players'; end if;
         insert into public.scoring_permissions(event_id,round_id,scorer_profile_id,participant_id,permission_type,grant_origin)
           select v_event,v_round,p.profile_id,target,'marker','group_auto'
           from public.participants p cross join unnest(v_ids) target

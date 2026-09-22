@@ -370,7 +370,7 @@ describe('roster administration (§4.2)', () => {
       const response = await callFunction<{
         applied: number
         plan: Array<{ displayName: string; account: string }>
-        issues: Array<{ code: string; column?: string; warning: boolean }>
+        issues: Array<{ row: number; code: string; column?: string; warning: boolean }>
       }>('catalog-admin', {
         action: 'import-participants', leagueId: LEAGUE_ID, csv, mode: 'apply', previewToken: await previewToken(csv),
       }, owner.accessToken)
@@ -380,7 +380,10 @@ describe('roster administration (§4.2)', () => {
       expect(response.body.plan[1]?.account).toBe('unknown_username')
       // A missing account is a warning, not a rejection: the player still
       // belongs on the roster, they just cannot sign in yet.
-      expect(response.body.issues.some((i) => i.column === 'username' && i.warning)).toBe(true)
+      // CsvIssue.row is 1-based over data rows; the guest is the second row.
+      expect(response.body.issues).toContainEqual(expect.objectContaining({
+        row: 2, column: 'username', code: 'required', warning: true,
+      }))
 
       const { data } = await service
         .from('participants').select('display_name, profile_id')

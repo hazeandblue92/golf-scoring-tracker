@@ -91,6 +91,16 @@ async function uncheckAll(checkboxes: Locator) {
   )).toBe(0);
 }
 
+/**
+ * The retained local league accumulates players across runs. Under a team
+ * preset every deselection re-pairs the whole field, so clear it under the
+ * individual preset, where a deselection is cheap.
+ */
+async function clearFieldWithoutTeams(page: Page, checkboxes: Locator) {
+  await page.getByLabel('Competition preset').selectOption('individual_gross');
+  await uncheckAll(checkboxes);
+}
+
 async function readOutbox(page: Page) {
   return page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -717,7 +727,8 @@ test('organizer publishes the two-person preset and moves between shared-score r
   await expect(page.getByLabel('Competition preset')).toHaveValue('two_person_throwdown');
   const eventField = page.getByRole('group', { name: 'Event field' });
   const fieldPlayers = eventField.getByRole('checkbox');
-  await uncheckAll(fieldPlayers);
+  await clearFieldWithoutTeams(page, fieldPlayers);
+  await page.getByLabel('Competition preset').selectOption('two_person_throwdown');
   for (const player of PHASE_2_PLAYERS) await eventField.getByRole('checkbox', { name: new RegExp(player) }).check();
   await expect(page.getByText('2 teams')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Handicap review' })).toBeVisible();
@@ -786,10 +797,10 @@ test('organizer publishes a four-player scramble and enters one team ball', asyn
 
   await page.getByRole('link', { name: 'Create event' }).click();
   await page.getByLabel('Event name').fill('E2E Four-Player Scramble');
-  await page.getByLabel('Competition preset').selectOption('four_player_scramble');
   const eventField = page.getByRole('group', { name: 'Event field' });
   const fieldPlayers = eventField.getByRole('checkbox');
-  await uncheckAll(fieldPlayers);
+  await clearFieldWithoutTeams(page, fieldPlayers);
+  await page.getByLabel('Competition preset').selectOption('four_player_scramble');
   for (const player of PHASE_3_PLAYERS) {
     await eventField.getByRole('checkbox', { name: new RegExp(player) }).check();
   }
@@ -817,6 +828,11 @@ test('organizer publishes a four-player scramble and enters one team ball', asyn
   await page.getByRole('button', { name: 'Save hole 1' }).click();
   await expect(page.getByRole('status')).toContainText('Saved to server', { timeout: 30_000 });
   await expect(page.getByText(/Team playing handicap/)).toHaveCount(2);
+  // The status still reads "Saved to server" from the first save. Hole chips
+  // are disabled while this one is in flight, which axe reports as a
+  // scrollable strip with nothing focusable, so wait for them to return.
+  await expect(page.getByRole('navigation', { name: 'Holes in this round' })
+    .getByRole('button').first()).toBeEnabled({ timeout: 30_000 });
   await expectAccessible(page);
 
   await page.getByRole('link', { name: 'Back to E2E Four-Player Scramble' }).click();
@@ -982,7 +998,14 @@ for (const preset of ['individual_gross', 'two_person_throwdown'] as const) {
       for (const result of [event, competitions, round, groups]) expect(result.error).toBeNull();
       return {
         event: event.data,
-        competitions: competitions.data,
+        // Saving from the builder also writes the flight set, which records an
+        // explicit `flighting: 'none'`. The API-created source omits the key;
+        // both mean an unflighted event.
+        competitions: competitions.data?.map(({ rules_json: rules, ...competition }) => {
+          if (rules === null || typeof rules !== 'object' || Array.isArray(rules)) return { ...competition, rules_json: rules };
+          const { flighting, ...rest } = rules;
+          return { ...competition, rules_json: flighting === 'none' ? rest : rules };
+        }),
         groups: groups.data?.map((group) => ({
           label: group.label, startHoleOrdinal: group.start_hole_ordinal,
           participantIds: group.group_members.flatMap((member) => member.event_entries

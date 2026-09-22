@@ -101,35 +101,23 @@ export function LeaguePlayers() {
     queryKey: ['players', leagueId],
     queryFn: async (): Promise<RosterPlayer[]> => {
       const supabase = getSupabaseClient();
+      // Embedded rather than filtered by an id list: a large roster's
+      // `in (...)` filter exceeds the gateway's URL limit (HTTP 414).
       const { data: players, error: rosterError } = await supabase
         .from('participants')
-        .select('id,display_name,status,profile_id')
+        .select('id,display_name,status,profile_id,participant_handicaps(participant_id,value,source,effective_from,effective_to),profiles(username,status)')
         .eq('league_id', leagueId)
         .order('sort_name');
       if (rosterError) throw rosterError;
-      const ids = (players ?? []).map((player) => player.id);
-      const profileIds = (players ?? [])
-        .map((player) => player.profile_id)
-        .filter((id): id is string => id !== null);
-
-      const [{ data: handicaps }, { data: profiles }] = await Promise.all([
-        ids.length
-          ? supabase
-              .from('participant_handicaps')
-              .select('participant_id,value,source,effective_from,effective_to')
-              .in('participant_id', ids)
-              .order('effective_from', { ascending: false })
-          : Promise.resolve({ data: [] }),
-        profileIds.length
-          ? supabase.from('profiles').select('id,username,status').in('id', profileIds)
-          : Promise.resolve({ data: [] }),
-      ]);
+      const handicaps = (players ?? [])
+        .flatMap((player) => player.participant_handicaps)
+        .toSorted((a, b) => b.effective_from.localeCompare(a.effective_from));
 
       // The current value is the interval covering today: the newest row whose
       // effective_to is still open. A future-dated revision is not yet in play.
       const today = new Date().toISOString().slice(0, 10);
       const current = new Map<string, { value: number; from: string; source: string }>();
-      for (const row of handicaps ?? []) {
+      for (const row of handicaps) {
         if (row.effective_from > today) continue;
         if (row.effective_to !== null && row.effective_to <= today) continue;
         if (!current.has(row.participant_id)) {
@@ -140,11 +128,9 @@ export function LeaguePlayers() {
           });
         }
       }
-      const profileById = new Map((profiles ?? []).map((p) => [p.id, p]));
 
-      return (players ?? []).map((player) => {
+      return (players ?? []).map(({ participant_handicaps: _handicaps, profiles: profile, ...player }) => {
         const handicap = current.get(player.id);
-        const profile = player.profile_id ? profileById.get(player.profile_id) : undefined;
         return {
           ...player,
           ...(handicap ? { handicap: handicap.value, handicapFrom: handicap.from, handicapSource: handicap.source } : {}),
