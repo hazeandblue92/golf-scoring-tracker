@@ -20,6 +20,7 @@
  * See docs/runbooks/local-stack-disk.md.
  */
 
+import { execFileSync } from 'node:child_process';
 import { statfs } from 'node:fs/promises';
 
 const MINIMUM_GIB = 10;
@@ -53,4 +54,38 @@ if (freeGiB < COMFORTABLE_GIB) {
     `Warning: ${freeGiB.toFixed(2)} GiB free is under the ${COMFORTABLE_GIB} GiB comfort level `
     + 'for a full `supabase db reset` plus an integration run.',
   );
+}
+
+// The VM's own Docker disk is capped, so it can fill while the host is fine.
+// On 2026-09-22 it reached 100% and Postgres crash-looped on
+// "could not write lock file" with 7 GiB still free on the host.
+const VM_MAXIMUM_USED_PERCENT = 90;
+const VM_COMFORTABLE_USED_PERCENT = 75;
+
+let vmDf = null;
+try {
+  vmDf = execFileSync('colima', ['ssh', '--', 'df', '-P', '/var/lib/docker'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: 15_000,
+  });
+} catch {
+  // Colima is absent or stopped; `supabase start` reports that clearly itself.
+}
+
+const vmUsedPercent = Number(vmDf?.trim().split('\n').at(-1)?.split(/\s+/)[4]?.replace('%', ''));
+if (Number.isFinite(vmUsedPercent)) {
+  console.log(JSON.stringify({ vmDockerDiskUsedPercent: vmUsedPercent }));
+  if (vmUsedPercent >= VM_MAXIMUM_USED_PERCENT) {
+    throw new Error(
+      `The Colima VM's Docker disk is ${vmUsedPercent}% full; Postgres fails to start once it `
+      + 'fills. Run `docker system df -v` to find the consumer — see docs/runbooks/local-stack-disk.md.',
+    );
+  }
+  if (vmUsedPercent >= VM_COMFORTABLE_USED_PERCENT) {
+    console.warn(
+      `Warning: the Colima VM's Docker disk is ${vmUsedPercent}% full. Old Supabase image versions `
+      + 'are removable with `docker image prune -a` while the stack is running.',
+    );
+  }
 }

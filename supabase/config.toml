@@ -406,8 +406,11 @@ verify_jwt = false
 [functions.report-error]
 verify_jwt = false
 
+# Off locally: Logflare copied every Postgres log line into the `_supabase`
+# database and grew it to 12 GB in a week of test runs (2026-09-22). Nothing in
+# the repo reads it. See docs/runbooks/local-stack-disk.md.
 [analytics]
-enabled = true
+enabled = false
 port = 54327
 # Configure one of the supported backends: `postgres`, `bigquery`.
 backend = "postgres"
