@@ -216,9 +216,6 @@ function holePointsFor(
   }
   if (computed.status === 'complete') {
     const metricScore = input.metric === 'net' ? computed.net : computed.gross
-    if (metricScore === null) {
-      throw new RangeError(`complete hole ${hole.id} lacks a metric score`)
-    }
     const relation = metricScore - hole.par
     return {
       ...base,

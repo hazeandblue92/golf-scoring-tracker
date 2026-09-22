@@ -142,8 +142,7 @@ export function calculateSkins(input: SkinsInput): SkinsResult {
     const pool = carry + input.rules.unitsPerHole
     const tiedLowIds = lowestScorers(field.candidates)
     if (tiedLowIds.length === 1) {
-      const winnerId = tiedLowIds[0]
-      if (winnerId === undefined) throw new RangeError('unreachable')
+      const winnerId = tiedLowIds[0]! // Exactly one tied-low ID in this branch.
       addUnits(totals, winnerId, pool)
       carry = 0
       lastUniqueWinnerId = winnerId
@@ -235,7 +234,7 @@ export function calculateSkins(input: SkinsInput): SkinsResult {
     holeOutcomes,
     totals: eligible.map((entry) => ({
       entityId: entry.entityId,
-      units: totals.get(entry.entityId) ?? 0,
+      units: totals.get(entry.entityId)!, // Initialized for every eligible entry.
     })),
     unawardedUnits,
     warnings,
@@ -380,7 +379,7 @@ function addUnits(
   entityId: string,
   units: number,
 ): void {
-  totals.set(entityId, (totals.get(entityId) ?? 0) + units)
+  totals.set(entityId, totals.get(entityId)! + units)
 }
 
 /** Published competition order; duplicate hole ids are a snapshot defect. */

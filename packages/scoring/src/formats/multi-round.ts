@@ -274,7 +274,7 @@ function sumWeightedValues(
 }
 
 function compareNumbers(a: number, b: number): number {
-  return a < b ? -1 : a > b ? 1 : 0
+  return a - b
 }
 
 /** Lower total wins for strokes; higher wins for points tables. */

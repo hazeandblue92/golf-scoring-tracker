@@ -12,8 +12,8 @@ export default defineConfig({
       provider: 'v8',
       include: ['packages/scoring/src/**'],
       thresholds: {
-        // Spec §20.3: scoring formulas/state machines require 100% branch
-        // coverage; enforced per-file ratchet lands with the CI workflow.
+        // Spec §20.3: every scoring formula/state machine must exercise all branches.
+        'packages/scoring/src/**': { branches: 100, perFile: true },
         branches: 95,
         lines: 85,
       },

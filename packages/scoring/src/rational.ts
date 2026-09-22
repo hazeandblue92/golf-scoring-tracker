@@ -27,7 +27,7 @@ function gcd(a: number, b: number): number {
     a = b
     b = t
   }
-  return a === 0 ? 1 : a
+  return a // The caller rejects a zero denominator, so gcd cannot be zero.
 }
 
 export function rational(num: number, den = 1): Rational {

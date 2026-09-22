@@ -117,11 +117,9 @@ export function scrambleTeamHandicap(
   let unrounded = ZERO
   const terms: string[] = []
   for (let i = 0; i < sorted.length; i += 1) {
-    const ch = sorted[i]
-    const weight = weights[i]
-    if (ch === undefined || weight === undefined) {
-      throw new RangeError(`missing scramble term at position ${i}`)
-    }
+    // Equal lengths were validated above and i is within both arrays.
+    const ch = sorted[i]!
+    const weight = weights[i]!
     unrounded = add(unrounded, mul(ch, weight))
     terms.push(`ch=${fmtCh(ch)} x w=${fmtWeight(weight)}`)
   }
@@ -257,7 +255,7 @@ export function calculateTeamBallTotals(input: TeamBallInput): TeamBallResult {
 
     const holeComputations: HoleComputation[] = []
     for (const hole of holes) {
-      const strokesReceived = strokes.get(hole.id) ?? 0
+      const strokesReceived = strokes.get(hole.id)! // Allocation covers every hole.
       const comp = computeHole(hole, scoreByHole.get(hole.id), strokesReceived)
       holeComputations.push(comp)
 
@@ -328,7 +326,7 @@ export function calculateTeamBallTotals(input: TeamBallInput): TeamBallResult {
   }
 
   const rows: TeamBallRow[] = computations.map((c) => {
-    const placement = rankByTeamId.get(c.team.teamId) ?? { rank: null, isTied: false }
+    const placement = rankByTeamId.get(c.team.teamId)! // Includes unranked teams.
     return {
       teamId: c.team.teamId,
       grossTotal: c.grossTotal,

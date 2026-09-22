@@ -120,6 +120,9 @@ export function calculateBestBall(input: BestBallInput): BestBallResult {
   const summaries: TeamSummary[] = []
 
   for (const team of teams) {
+    if (new Set(team.members.map((member) => member.participantId)).size !== team.members.length) {
+      throw new RangeError('duplicate participant in best-ball team')
+    }
     // ── Member eligibility and stroke allocation (net-before-select) ────────
     const members: MemberContext[] = []
     for (const member of team.members) {
@@ -172,18 +175,13 @@ export function calculateBestBall(input: BestBallInput): BestBallResult {
         }
         if (computed.status !== 'complete') continue // terminal, no value
         const value = metric === 'net' ? computed.net : computed.gross
-        if (value === null) continue // unreachable: complete implies numeric
         candidates.push({ participantId: member.participantId, value })
       }
       // Deterministic ascending order by (score, participantId).
       candidates.sort((a, b) =>
         a.value !== b.value
           ? a.value - b.value
-          : a.participantId < b.participantId
-            ? -1
-            : a.participantId > b.participantId
-              ? 1
-              : 0,
+          : a.participantId < b.participantId ? -1 : 1, // Member IDs are unique.
       )
 
       let teamScore: number | null = null

@@ -185,12 +185,11 @@ export function resolveCountback(input: CountbackInput): CountbackResult {
         run.push(item)
         runTotal = item.total
       }
-      if (run.length > 0) {
-        next.push({
-          members: run.map((r) => r.member),
-          resolvedBy: run.length === 1 ? token : group.resolvedBy,
-        })
-      }
+      // This group has at least two members; its final run is nonempty.
+      next.push({
+        members: run.map((r) => r.member),
+        resolvedBy: run.length === 1 ? token : group.resolvedBy,
+      })
     }
     groups = next
   }

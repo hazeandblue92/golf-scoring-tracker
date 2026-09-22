@@ -20,15 +20,13 @@ import type {
   TeamHoleScore,
 } from './types.ts'
 
-export interface HoleComputation {
+export type HoleComputation = {
   holeId: string
-  gross: number | null
   strokesReceived: number
-  net: number | null
-  status: HoleScoreStatus
   /** True when this hole still awaits a valid value or terminal status. */
   pending: boolean
-}
+} & ({ status: 'complete'; gross: number; net: number }
+  | { status: Exclude<HoleScoreStatus, 'complete'>; gross: null; net: null })
 
 export type AnyHoleScore = IndividualHoleScore | TeamHoleScore
 
@@ -53,7 +51,7 @@ export function computeHole(
       gross: null,
       strokesReceived,
       net: null,
-      status: score?.status ?? 'not_started',
+      status: 'not_started',
       pending: true,
     }
   }
@@ -154,7 +152,7 @@ export function assignRanks<T>(
     out.push({
       entry: e.entry,
       rank,
-      isTied: (counts.get(e.result) ?? 0) > 1,
+      isTied: counts.get(e.result)! > 1, // Every result was counted above.
     })
     prevResult = e.result
     prevRank = rank

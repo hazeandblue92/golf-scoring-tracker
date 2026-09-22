@@ -204,9 +204,6 @@ function holeResultFor(
   }
   if (computed.status === 'complete') {
     const metricScore = input.metric === 'net' ? computed.net : computed.gross
-    if (metricScore === null) {
-      throw new RangeError(`complete hole ${hole.id} lacks a metric score`)
-    }
     if (metricScore < hole.par) return { ...base, outcome: 1, provisional: false }
     if (metricScore === hole.par) return { ...base, outcome: 0, provisional: false }
     return { ...base, outcome: -1, provisional: false }

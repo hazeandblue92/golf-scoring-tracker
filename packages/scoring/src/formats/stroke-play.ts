@@ -169,7 +169,7 @@ export function calculateStrokePlay(input: StrokePlayInput): StrokePlayResult {
     const cappedHoleIds: string[] = []
 
     for (const hole of holes) {
-      const strokesReceived = strokes.get(hole.id) ?? 0
+      const strokesReceived = strokes.get(hole.id)! // Allocation covers every hole.
       const comp = computeHole(hole, scoreByHole.get(hole.id), strokesReceived)
       if (comp.pending) pending = true
       else if (comp.status !== 'complete') terminalGap = true
@@ -258,7 +258,7 @@ export function calculateStrokePlay(input: StrokePlayInput): StrokePlayResult {
   }
 
   const rows: StrokePlayRow[] = computations.map((c) => {
-    const placement = rankByEntryId.get(c.entry.entryId) ?? { rank: null, isTied: false }
+    const placement = rankByEntryId.get(c.entry.entryId)! // Includes unranked entries.
     return {
       entryId: c.entry.entryId,
       grossTotal: metric === 'gross' ? c.cappedGross : c.rawGross,
