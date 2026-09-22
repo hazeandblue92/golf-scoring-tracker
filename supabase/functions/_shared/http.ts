@@ -8,6 +8,7 @@
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
 import { createSupabaseContext } from 'npm:@supabase/server@1.4.1'
+import type { Database } from './database.ts'
 import {
   CORS_HEADERS,
   decodeJwtPayload,
@@ -50,15 +51,15 @@ export function rejected(
 }
 
 /** Service-role client. Server-side only — never reachable from a browser. */
-export function serviceClient(): SupabaseClient {
+export function serviceClient(): SupabaseClient<Database> {
   const env = readEdgeEnv()
-  return createClient(env.supabaseUrl, env.serviceRoleKey, {
+  return createClient<Database>(env.supabaseUrl, env.serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   })
 }
 
 export interface AuthedCaller {
-  client: SupabaseClient
+  client: SupabaseClient<Database>
   userId: string
   token: string
 }
@@ -82,7 +83,7 @@ export async function requireUser(
   const token = match[1].trim()
   let context
   try {
-    const result = await createSupabaseContext(req, { auth: 'user' })
+    const result = await createSupabaseContext<Database>(req, { auth: 'user' })
     if (result.error) {
       return rejected(401, 'AUTH_REQUIRED', correlationId, 'invalid session')
     }
@@ -93,13 +94,11 @@ export async function requireUser(
   if (!context?.userClaims?.id) {
     return rejected(401, 'AUTH_REQUIRED', correlationId, 'invalid session')
   }
-  // Without generated database types supabase-js infers the row as `never`,
-  // so name the shape here rather than reaching into an untyped result.
   const { data: profile, error: profileError } = await context.supabase
     .from('profiles')
     .select('status,must_change_password')
     .eq('id', context.userClaims.id)
-    .maybeSingle<{ status: string; must_change_password: boolean }>()
+    .maybeSingle()
   if (profileError || !profile || profile.status !== 'active') {
     return rejected(401, 'AUTH_REQUIRED', correlationId, 'inactive session')
   }
@@ -112,7 +111,7 @@ export async function requireUser(
     )
   }
   return {
-    client: context.supabase as SupabaseClient,
+    client: context.supabase,
     userId: context.userClaims.id,
     token,
   }

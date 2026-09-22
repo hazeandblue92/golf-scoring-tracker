@@ -9,6 +9,7 @@
  */
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2'
+import type { Database } from './database.ts'
 
 export interface SnapshotHole {
   id: string
@@ -145,15 +146,10 @@ export interface ScoringSnapshot {
   teamScores: SnapshotTeamScore[]
 }
 
-async function selectAll<T>(
-  service: SupabaseClient,
-  table: string,
-  columns: string,
-  filter: (q: any) => any,
-): Promise<T[]> {
-  const { data, error } = await filter(service.from(table).select(columns))
-  if (error) throw new Error(`snapshot read failed for ${table}: ${error.message}`)
-  return (data ?? []) as T[]
+async function selectAll<T>(query: PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
+  const { data, error } = await query
+  if (error) throw new Error('snapshot read failed: ' + error.message)
+  return data ?? []
 }
 
 function compareText(a: string, b: string): number {
@@ -161,7 +157,7 @@ function compareText(a: string, b: string): number {
 }
 
 export async function loadScoringSnapshot(
-  service: SupabaseClient,
+  service: SupabaseClient<Database>,
   eventId: string,
 ): Promise<ScoringSnapshot> {
   const { data: eventRow, error: eventError } = await service
@@ -173,10 +169,7 @@ export async function loadScoringSnapshot(
     throw new Error(`snapshot read failed for events: ${eventError?.message ?? 'not found'}`)
   }
 
-  const rounds = await selectAll<{ id: string; round_number: number }>(
-    service, 'rounds', 'id, round_number', (q) =>
-      q.eq('event_id', eventId).order('round_number').order('id'),
-  )
+  const rounds = await selectAll(service.from('rounds').select('id, round_number').eq('event_id', eventId).order('round_number').order('id'))
   const roundIds = rounds.map((r) => r.id)
 
   const [
@@ -191,57 +184,18 @@ export async function loadScoringSnapshot(
     teamScores,
   ] = await Promise.all([
     roundIds.length
-      ? selectAll<SnapshotHole>(
-          service, 'event_holes', 'id, round_id, hole_ordinal, par, stroke_index',
-          (q) => q.in('round_id', roundIds).order('hole_ordinal'),
-        )
+      ? selectAll(service.from('event_holes').select('id, round_id, hole_ordinal, par, stroke_index').in('round_id', roundIds).order('hole_ordinal'))
       : Promise.resolve([]),
-    selectAll<SnapshotEntry>(
-      service, 'event_entries',
-      'id, event_id, participant_id, status, course_handicap_unrounded, ' +
-        'playing_handicap, flight_id, effective_from_round_id, replaces_entry_id',
-      (q) => q.eq('event_id', eventId),
-    ),
-    selectAll<SnapshotTeam>(
-      service, 'event_teams',
-      'id, event_id, name, status, flight_id, course_handicap_unrounded, ' +
-        'playing_handicap, allowance',
-      (q) => q.eq('event_id', eventId),
-    ),
-    selectAll<SnapshotFlight>(
-      service, 'flights', 'id, event_id, name, sort_order',
-      (q) => q.eq('event_id', eventId).order('sort_order'),
-    ),
+    selectAll(service.from('event_entries').select('id, event_id, participant_id, status, course_handicap_unrounded, playing_handicap, flight_id, effective_from_round_id, replaces_entry_id').eq('event_id', eventId)),
+    selectAll(service.from('event_teams').select('id, event_id, name, status, flight_id, course_handicap_unrounded, playing_handicap, allowance').eq('event_id', eventId)),
+    selectAll(service.from('flights').select('id, event_id, name, sort_order').eq('event_id', eventId).order('sort_order')),
     roundIds.length
-      ? selectAll<SnapshotGroup>(
-          service, 'groups', 'id, round_id, start_hole_ordinal',
-          (q) => q.in('round_id', roundIds).order('round_id').order('sort_order').order('id'),
-        )
+      ? selectAll(service.from('groups').select('id, round_id, start_hole_ordinal').in('round_id', roundIds).order('round_id').order('sort_order').order('id'))
       : Promise.resolve([]),
-    selectAll<SnapshotCompetition>(
-      service, 'competitions',
-      'id, event_id, name, format, metric, status, rules_schema_version, rules_json, engine_version',
-      (q) => q.eq('event_id', eventId).order('sort_order'),
-    ),
-    selectAll<{
-      competition_id: string
-      round_id: string
-      hole_scope: number[] | null
-      weight: number | null
-    }>(
-      service, 'competition_rounds', 'competition_id, round_id, hole_scope, weight',
-      (q) => (roundIds.length ? q.in('round_id', roundIds) : q.limit(0)),
-    ),
-    selectAll<SnapshotIndividualScore>(
-      service, 'individual_hole_scores',
-      'event_entry_id, event_hole_id, gross_strokes, score_status, revision',
-      (q) => q.eq('event_id', eventId),
-    ),
-    selectAll<SnapshotTeamScore>(
-      service, 'team_hole_scores',
-      'event_team_id, event_hole_id, gross_strokes, score_status, revision',
-      (q) => q.eq('event_id', eventId),
-    ),
+    selectAll(service.from('competitions').select('id, event_id, name, format, metric, status, rules_schema_version, rules_json, engine_version').eq('event_id', eventId).order('sort_order')),
+    selectAll(roundIds.length ? service.from('competition_rounds').select('competition_id, round_id, hole_scope, weight').in('round_id', roundIds) : service.from('competition_rounds').select('competition_id, round_id, hole_scope, weight').limit(0)),
+    selectAll(service.from('individual_hole_scores').select('event_entry_id, event_hole_id, gross_strokes, score_status, revision').eq('event_id', eventId)),
+    selectAll(service.from('team_hole_scores').select('event_team_id, event_hole_id, gross_strokes, score_status, revision').eq('event_id', eventId)),
   ])
 
   const roundNumberById = new Map(rounds.map((round) => [round.id, round.round_number]))
@@ -262,35 +216,19 @@ export async function loadScoringSnapshot(
 
   const [competitionEntities, teamMembers, groupMembers, matches] = await Promise.all([
     competitionIds.length
-      ? selectAll<SnapshotCompetitionEntity>(
-          service, 'competition_entities',
-          'id, competition_id, event_entry_id, event_team_id, eligibility_status, flight_id',
-          (q) => q.in('competition_id', competitionIds),
-        )
+      ? selectAll(service.from('competition_entities').select('id, competition_id, event_entry_id, event_team_id, eligibility_status, flight_id').in('competition_id', competitionIds))
       : Promise.resolve([]),
     teamIds.length
-      ? selectAll<{ event_team_id: string; event_entry_id: string }>(
-          service, 'event_team_members', 'event_team_id, event_entry_id',
-          (q) => q.in('event_team_id', teamIds),
-        )
+      ? selectAll(service.from('event_team_members').select('event_team_id, event_entry_id').in('event_team_id', teamIds))
       : Promise.resolve([]),
     groupIds.length
-      ? selectAll<SnapshotGroupMember>(
-          service, 'group_members', 'group_id, event_entry_id, event_team_id',
-          (q) => q.in('group_id', groupIds).order('group_id').order('id'),
-        )
+      ? selectAll(service.from('group_members').select('group_id, event_entry_id, event_team_id').in('group_id', groupIds).order('group_id').order('id'))
       : Promise.resolve([]),
     competitionIds.length
-      ? selectAll<SnapshotMatch>(
-          service, 'matches',
-          'id, competition_id, round_id, side_a_entity_id, side_b_entity_id, ' +
-            'bracket_position, status, winner_entity_id, concession_by',
-          (q) =>
-            q.in('competition_id', competitionIds)
+      ? selectAll(service.from('matches').select('id, competition_id, round_id, side_a_entity_id, side_b_entity_id, bracket_position, status, winner_entity_id, concession_by').in('competition_id', competitionIds)
               .order('round_id')
               .order('bracket_position')
-              .order('id'),
-        )
+              .order('id'))
       : Promise.resolve([]),
   ])
 

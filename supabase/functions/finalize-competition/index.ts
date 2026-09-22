@@ -1,5 +1,6 @@
 /** Deterministically finalize a Phase 1 competition (spec §12.2). */
 
+import { databaseJson } from '../_shared/database.ts'
 import { finalizeCompetitionRequestSchema } from '../../../packages/contracts/src/index.ts'
 import { buildProjections } from '../_shared/projection-orchestrator.ts'
 import { loadScoringSnapshot } from '../_shared/snapshot.ts'
@@ -27,7 +28,7 @@ async function publishCurrent(
   const { data, error } = await service.rpc('publish_projections', {
     p_event_id: eventId,
     p_revision: snapshot.event.scoring_revision,
-    p_result: payload,
+    p_result: databaseJson(payload),
   })
   if (error) throw new Error(error.message)
   if ((data as { status?: string } | null)?.status !== 'published') {

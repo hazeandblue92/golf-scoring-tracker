@@ -1,5 +1,6 @@
 /** Publish immutable event snapshots and optionally open scoring (spec §12.2). */
 
+import { databaseJson } from '../_shared/database.ts'
 import { publishEventRequestSchema } from '../../../packages/contracts/src/index.ts'
 import { buildProjections } from '../_shared/projection-orchestrator.ts'
 import { loadScoringSnapshot } from '../_shared/snapshot.ts'
@@ -109,7 +110,7 @@ Deno.serve(async (req: Request) => {
       {
         p_event_id: parsed.data.eventId,
         p_revision: snapshot.event.scoring_revision,
-        p_result: payload,
+        p_result: databaseJson(payload),
       },
     )
     if (projectionError) throw new Error(projectionError.message)

@@ -336,7 +336,12 @@ export function reviewParticipantCsv(text: string): ParticipantImportReport {
       }
     }
 
-    const rawHandicap = row['handicap_index'] ?? ''
+    // Our spreadsheet-safe export prefixes signed numbers with an apostrophe.
+    // Remove it only for a strict numeric value, never an arbitrary formula.
+    const exportedHandicap = row['handicap_index'] ?? ''
+    const rawHandicap = /^'[+-]?\d+(\.\d+)?$/.test(exportedHandicap)
+      ? exportedHandicap.slice(1)
+      : exportedHandicap
     let handicapValue: number | null = null
     if (rawHandicap !== '') {
       // A leading '+' is how golf writes a plus handicap; internally it is

@@ -19,6 +19,22 @@ import {
   toCsv,
 } from '../src/csv.ts'
 
+describe('roster export/import round trip', () => {
+  it.each([-2, -2.5, 0, 12.3])('preserves handicap %s with spreadsheet protection', (value) => {
+    const csv = toCsv(
+      ['display_name', 'handicap_index', 'handicap_source', 'effective_from', 'status'],
+      [['Round Trip', value, 'manual_verified', '2026-09-09', 'active']],
+    )
+    const report = reviewParticipantCsv(csv)
+    expect(report.ok).toBe(true)
+    expect(report.rows[0]?.handicapValue).toBe(value)
+  })
+  it('does not treat an escaped formula as a handicap', () => {
+    const report = reviewParticipantCsv("display_name,handicap_index\nRound Trip,'-2+3\n")
+    expect(report.ok).toBe(false)
+  })
+})
+
 describe('parseCsv survives what real spreadsheets emit (§21.2)', () => {
   it('strips a byte-order mark from the first header', () => {
     const table = parseCsv('﻿display_name,username\nCasey,casey\n')

@@ -25,6 +25,11 @@ export const saveEventDraftRequestSchema = z.strictObject({
   teeSetId: z.uuid(),
   participantIds: uuidArray,
   scorerProfileIds: z.array(z.uuid()).default([]),
+  groups: z.array(z.strictObject({
+    label: z.string().trim().min(1).max(100),
+    startHoleOrdinal: z.number().int().min(1).max(18).nullable(),
+    participantIds: uuidArray,
+  })).min(1).optional(),
   competitionPreset: z
     .enum([
       'individual_gross',

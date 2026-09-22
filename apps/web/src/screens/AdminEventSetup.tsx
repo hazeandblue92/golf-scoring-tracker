@@ -3,14 +3,9 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 
 import { publishEvent, saveEventDraft } from '../lib/phase1.ts';
-import { relationValue } from '../lib/row-display.ts';
 import { getSupabaseClient } from '../lib/supabase.ts';
+import { hasSameGrouping, templatePreset, type CompetitionPreset } from '../lib/event-template.ts';
 
-type CompetitionPreset =
-  | 'individual_gross'
-  | 'two_person_throwdown'
-  | 'three_player_scramble'
-  | 'four_player_scramble';
 type TeamDraft = { name: string; participantIds: string[] };
 /** A division within the event (§5.2). Membership is by participant id. */
 type FlightDraft = { id?: string; name: string; participantIds: string[] };
@@ -83,36 +78,55 @@ export function AdminEventSetup() {
       let round = null;
       let entryParticipantIds: string[] = [];
       let existingTeams: TeamDraft[] = [];
+      let existingPreset: CompetitionPreset | null = null;
+      let existingGroups: Array<{ label: string; startHoleOrdinal: number | null; participantIds: string[] }> | undefined;
       let existingFlights: FlightDraft[] = [];
       let existingScorerProfileIds: string[] = [];
       let legacyScorerCount = 0;
       // Setup reads follow the template when creating from one; identity
       // (name, dates, visibility) deliberately does not.
       const setupSourceId = templateId ?? (routeEventId === 'new' ? null : routeEventId);
-      if (setupSourceId !== null) {
-        const [roundResult, entryResult, teamResult, flightResult, markerResult] = await Promise.all([
+      if (setupSourceId !== null && (existing === null || existing.status === 'draft')) {
+        const [roundResult, entryResult, teamResult, flightResult, markerResult, competitionResult] = await Promise.all([
           supabase.from('rounds').select('id,source_tee_set_id').eq('event_id', setupSourceId).order('round_number'),
           supabase.from('event_entries').select('participant_id,flight_id').eq('event_id', setupSourceId),
           supabase.from('event_teams').select('id,name,event_team_members(position,event_entries(participant_id))').eq('event_id', setupSourceId).order('created_at'),
           supabase.from('flights').select('id,name,sort_order').eq('event_id', setupSourceId).order('sort_order'),
           supabase.from('scoring_permissions').select('scorer_profile_id,grant_origin').eq('event_id', setupSourceId).eq('permission_type', 'marker').is('valid_to', null),
+          supabase.from('competitions').select('format,metric,rules_json').eq('event_id', setupSourceId),
         ]);
-        const setupError = roundResult.error ?? entryResult.error ?? teamResult.error ?? flightResult.error ?? markerResult.error;
+        const setupError = roundResult.error ?? entryResult.error ?? teamResult.error ?? flightResult.error ?? markerResult.error ?? competitionResult.error;
         if (setupError) throw setupError;
         const rounds = roundResult.data;
         const entries = entryResult.data;
         const teams = teamResult.data;
         const flights = flightResult.data;
         round = rounds?.[0] ?? null;
+        if ((rounds?.length ?? 0) > 1) throw new Error('The setup builder supports copying single-round events.');
+        // A newly created draft can contain only event basics. It has no
+        // persisted format yet; published events use the frozen view instead.
+        if (round || (competitionResult.data?.length ?? 0) > 0) {
+          existingPreset = templatePreset(competitionResult.data ?? []);
+        }
+        if (round) {
+          const groups = await supabase.from('groups')
+            .select('label,start_hole_ordinal,group_members(sort_order,event_entries(participant_id),event_teams(event_team_members(position,event_entries(participant_id))))')
+            .eq('round_id', round.id).order('sort_order');
+          if (groups.error) throw groups.error;
+          existingGroups = (groups.data ?? []).map((group) => ({
+            label: group.label, startHoleOrdinal: group.start_hole_ordinal,
+            participantIds: group.group_members.toSorted((a, b) => a.sort_order - b.sort_order).flatMap((member) =>
+              member.event_entries ? [member.event_entries.participant_id]
+                : (member.event_teams?.event_team_members ?? []).toSorted((a, b) => a.position - b.position)
+                    .map((m) => m.event_entries!.participant_id)),
+          }));
+        }
         entryParticipantIds = (entries ?? []).map((entry) => entry.participant_id);
-        existingTeams = ((teams ?? []) as unknown as Array<{
-          name: string;
-          event_team_members: Array<{ position: number; event_entries: { participant_id: string } | { participant_id: string }[] | null }>;
-        }>).map((team) => ({
+        existingTeams = (teams ?? []).map((team) => ({
           name: team.name,
           participantIds: team.event_team_members
             .toSorted((a, b) => a.position - b.position)
-            .map((member) => relationValue(member.event_entries)?.participant_id ?? ''),
+            .map((member) => member.event_entries?.participant_id ?? ''),
         })).filter((team) => team.participantIds.length >= 2 && team.participantIds.length <= 4 && team.participantIds.every(Boolean));
         existingFlights = (flights ?? []).map((flight) => ({
           // A template's flight ids belong to the source event. Carrying them
@@ -152,7 +166,7 @@ export function AdminEventSetup() {
         : { data: null };
 
       const teeSets = (courses ?? []).flatMap((course) => course.course_layouts.flatMap((layout) => layout.tee_sets.filter((tee) => tee.status === 'active').map((tee) => ({ ...tee, label: `${course.name} · ${layout.name} · ${tee.name}` }))));
-      return { leagueId, league: leagues?.find((league) => league.id === leagueId), seasons: seasons ?? [], participants: participants ?? [], teeSets, existing, round, entryParticipantIds, existingTeams, existingFlights, existingScorerProfileIds, legacyScorerCount, recentEvents: recentEvents ?? [] };
+      return { leagueId, league: leagues?.find((league) => league.id === leagueId), seasons: seasons ?? [], participants: participants ?? [], teeSets, existing, round, entryParticipantIds, existingTeams, existingPreset, existingGroups, existingFlights, existingScorerProfileIds, legacyScorerCount, recentEvents: recentEvents ?? [] };
     },
   });
 
@@ -168,7 +182,7 @@ export function AdminEventSetup() {
   const existing = data.existing;
   const initialIds = data.entryParticipantIds.length ? data.entryParticipantIds : data.participants.map((participant) => participant.id);
   const activeIds = selectedIds ?? initialIds;
-  const activePreset = preset ?? inferExistingPreset(data.existingTeams)
+  const activePreset = preset ?? data.existingPreset
     ?? (routeEventId === 'new' ? 'two_person_throwdown' : 'individual_gross');
   const teamSize = teamSizeForPreset(activePreset);
   const effectiveTeamSize = teamSize ?? 2;
@@ -314,6 +328,11 @@ export function AdminEventSetup() {
         scorerProfileIds: form.getAll('scorerProfileIds').map(String),
         competitionPreset: activePreset,
         teams: isTeamEvent ? activeTeams : [],
+        ...(data.existingGroups?.length && hasSameGrouping(
+          { preset: data.existingPreset, participantIds: data.entryParticipantIds, teams: data.existingTeams },
+          { preset: activePreset, participantIds: activeIds, teams: isTeamEvent ? activeTeams : [] },
+        )
+          ? { groups: data.existingGroups } : {}),
       });
       // Keep the event identity as soon as the first transaction succeeds. If
       // the flight transaction fails, retry updates this draft instead of
@@ -778,14 +797,6 @@ function teamSizeForPreset(preset: CompetitionPreset): 2 | 3 | 4 | null {
   if (preset === 'two_person_throwdown') return 2;
   if (preset === 'three_player_scramble') return 3;
   if (preset === 'four_player_scramble') return 4;
-  return null;
-}
-
-function inferExistingPreset(teams: TeamDraft[]): CompetitionPreset | null {
-  const size = teams[0]?.participantIds.length;
-  if (size === 2) return 'two_person_throwdown';
-  if (size === 3) return 'three_player_scramble';
-  if (size === 4) return 'four_player_scramble';
   return null;
 }
 

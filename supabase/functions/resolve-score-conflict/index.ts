@@ -1,5 +1,6 @@
 /** Resolve an explicit score conflict without last-write-wins (spec §10.4). */
 
+import { databaseJson } from '../_shared/database.ts'
 import { resolveScoreConflictRequestSchema } from '../../../packages/contracts/src/index.ts'
 import { buildProjections } from '../_shared/projection-orchestrator.ts'
 import {
@@ -63,7 +64,7 @@ async function publishLatestProjection(
     const { data, error } = await service.rpc('publish_projections', {
       p_event_id: eventId,
       p_revision: snapshot.event.scoring_revision,
-      p_result: buildProjections(snapshot),
+      p_result: databaseJson(buildProjections(snapshot)),
     })
     const publication = data as { status?: string; event_revision?: number } | null
     if (error || publication?.status !== 'published') return null

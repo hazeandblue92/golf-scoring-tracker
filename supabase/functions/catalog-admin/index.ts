@@ -24,6 +24,7 @@ import {
   requireUser,
   serviceClient,
 } from '../_shared/http.ts'
+import { z } from 'npm:zod@4.5.4'
 
 interface CatalogRequest {
   action?: string
@@ -40,6 +41,7 @@ interface CatalogRequest {
   handicapEffectiveFrom?: string | null
   csv?: string
   mode?: string
+  previewToken?: string
   location?: string | null
   timezone?: string
   layoutName?: string
@@ -74,7 +76,7 @@ async function recordHandicap(
     p_actor: actorId,
     p_participant_id: participantId,
     p_value: handicap.value,
-    p_source: handicap.source,
+    p_source: z.enum(['manual_verified', 'authorized_import', 'league_value', 'scratch_fallback', 'none']).parse(handicap.source),
     p_effective_from: handicap.effectiveFrom,
     p_source_reference: null,
   })
@@ -110,104 +112,18 @@ async function applyParticipantImport(
   rows: readonly ParticipantImportRow[],
   issues: readonly CsvIssue[],
   write: boolean,
-): Promise<{ applied: number; plan: ImportPlanRow[]; issues: CsvIssue[] }> {
-  const reported: CsvIssue[] = [...issues]
-  const plan: ImportPlanRow[] = []
-  if (rows.length === 0) return { applied: 0, plan, issues: reported }
-
-  const { data: existing, error: rosterError } = await service
-    .from('participants')
-    .select('id, display_name, profile_id, status')
-    .eq('league_id', leagueId)
-  if (rosterError) throw rosterError
-
-  const byName = new Map<string, Array<{ id: string; profile_id: string | null }>>()
-  for (const participant of existing ?? []) {
-    const key = String(participant.display_name).toLocaleLowerCase()
-    byName.set(key, [...(byName.get(key) ?? []), participant])
-  }
-
-  const usernames = rows.map((row) => row.username).filter((name): name is string => name !== null)
-  const profileByUsername = new Map<string, string>()
-  if (usernames.length > 0) {
-    const { data: profiles, error: profileError } = await service
-      .from('profiles')
-      .select('id, username')
-      .in('username', usernames)
-    if (profileError) throw profileError
-    for (const profile of profiles ?? []) {
-      profileByUsername.set(String(profile.username).toLowerCase(), profile.id as string)
-    }
-  }
-
-  let applied = 0
-  for (const [index, row] of rows.entries()) {
-    const rowNumber = index + 1
-    const matches = byName.get(row.displayName.toLocaleLowerCase()) ?? []
-    if (matches.length > 1) {
-      reported.push({
-        row: rowNumber,
-        column: 'display_name',
-        code: 'duplicate_key',
-        message:
-          `The roster already has ${matches.length} players named '${row.displayName}'. ` +
-          'This row was skipped: rename them or edit the player directly.',
-        warning: true,
-      })
-      continue
-    }
-    const match = matches[0]
-    const profileId = row.username === null
-      ? match?.profile_id ?? null
-      : profileByUsername.get(row.username) ?? null
-    const account = row.username === null
-      ? (profileId === null ? 'no_account' : 'linked')
-      : (profileId === null ? 'unknown_username' : 'linked')
-    if (account === 'unknown_username') {
-      reported.push({
-        row: rowNumber,
-        column: 'username',
-        code: 'required',
-        message:
-          `No account exists for '${row.username}'. The player was imported as a guest; ` +
-          'create the account from the roster to give them sign-in access.',
-        warning: true,
-      })
-    }
-
-    plan.push({
-      displayName: row.displayName,
-      action: match ? 'update' : 'create',
-      handicap: row.handicapValue,
-      status: row.status,
-      account,
-    })
-    if (!write) continue
-
-    const participantId = match?.id ?? crypto.randomUUID()
-    const record = {
-      id: participantId,
-      league_id: leagueId,
-      profile_id: profileId,
-      display_name: row.displayName,
-      sort_name: row.displayName.toLocaleLowerCase(),
-      status: row.status,
-    }
-    const { error } = match
-      ? await service.from('participants').update(record).eq('id', participantId).eq('league_id', leagueId)
-      : await service.from('participants').insert(record)
-    if (error) throw error
-    if (row.handicapValue !== null) {
-      await recordHandicap(service, actorId, participantId, {
-        value: row.handicapValue,
-        source: row.handicapSource,
-        effectiveFrom: row.effectiveFrom,
-      })
-    }
-    applied += 1
-  }
-
-  return { applied, plan, issues: reported }
+  previewToken?: string,
+): Promise<{ applied: number; plan: ImportPlanRow[]; issues: CsvIssue[]; previewToken: string }> {
+  const { data, error } = await service.rpc('import_participants_atomic', {
+    p_actor: actorId,
+    p_league_id: leagueId,
+    p_rows: rows.map((row) => ({ ...row })),
+    p_apply: write,
+    p_preview_token: previewToken ?? null,
+  })
+  if (error) throw error
+  const result = data as unknown as { applied: number; plan: ImportPlanRow[]; previewToken: string; issues: CsvIssue[] }
+  return { ...result, issues: [...issues, ...result.issues] }
 }
 
 
@@ -282,7 +198,7 @@ Deno.serve(async (req: Request) => {
       const row = {
         id: targetId, league_id: body.leagueId, name: body.name.trim(),
         starts_on: body.startsOn, ends_on: body.endsOn,
-        ...(status === undefined ? {} : { status }),
+        ...(status === undefined ? {} : { status: z.enum(['planned', 'active', 'completed', 'archived']).parse(status) }),
       }
       const { error } = body.id ? await service.from('seasons').update(row).eq('id', body.id).eq('league_id', body.leagueId) : await service.from('seasons').insert(row)
       if (error) throw error
@@ -318,15 +234,8 @@ Deno.serve(async (req: Request) => {
       const summary = await applyParticipantImport(
         service, caller.userId, body.leagueId, report.rows, report.issues,
         body.mode === 'apply' && report.ok,
+        body.previewToken,
       )
-      await service.from('audit_events').insert({
-        actor_profile_id: caller.userId,
-        action: `catalog.import-participants.${body.mode}`,
-        scope_league_id: body.leagueId,
-        target_type: 'participant',
-        target_id: null,
-        after_json: { rowsRead: report.rowsRead, applied: summary.applied },
-      })
       return json(200, {
         status: body.mode === 'apply' && report.ok ? 'imported' : 'previewed',
         applied: summary.applied,
@@ -334,6 +243,7 @@ Deno.serve(async (req: Request) => {
         ok: report.ok,
         issues: summary.issues,
         plan: summary.plan,
+        previewToken: summary.previewToken,
         correlationId,
       })
     } else if (body.action === 'create-course') {

@@ -108,6 +108,13 @@ describe('roster administration (§4.2)', () => {
     const rows = await handicapRows(participantId)
     expect(rows).toHaveLength(1)
     expect(Number(rows[0]?.value)).toBe(8.5)
+    const { data: audit, error } = await service.from('audit_events')
+      .select('before_json,after_json,actor_profile_id')
+      .eq('target_id', participantId).eq('action', 'participant.handicap_corrected').single()
+    expect(error).toBeNull()
+    expect(audit?.before_json).toMatchObject({ value: 8, verified_by: owner.profileId })
+    expect(audit?.after_json).toMatchObject({ value: 8.5, verified_by: owner.profileId })
+    expect(audit?.actor_profile_id).toBe(owner.profileId)
     expect(rows[0]?.effective_to).toBeNull()
   })
 
@@ -220,7 +227,45 @@ describe('roster administration (§4.2)', () => {
     expect(invalid.status).toBe(409)
   })
 
+  async function previewToken(csv: string) {
+    const result = await callFunction<{ previewToken: string }>('catalog-admin', {
+      action: 'import-participants', leagueId: LEAGUE_ID, csv, mode: 'preview',
+    }, owner.accessToken)
+    expect(result.status, JSON.stringify(result.body)).toBe(200)
+    return result.body.previewToken
+  }
+
   describe('CSV import (§4.2, §21.2)', () => {
+    it('rejects a stale approved preview without writing', async () => {
+      const tag = randomUUID().slice(0, 8)
+      const csv = `display_name\nStale ${tag}\n`
+      const token = await previewToken(csv)
+      await addPlayer(`Changed ${tag}`, null)
+      const result = await callFunction('catalog-admin', {
+        action: 'import-participants', leagueId: LEAGUE_ID, csv, mode: 'apply', previewToken: token,
+      }, owner.accessToken)
+      expect(result.status).toBe(409)
+      const { data } = await service.from('participants').select('id').eq('display_name', `Stale ${tag}`)
+      expect(data).toEqual([])
+    })
+
+    it('rolls back earlier rows when a later handicap write is rejected', async () => {
+      const tag = randomUUID().slice(0, 8)
+      const rows = [12, 55].map((handicapValue, index) => ({
+        displayName: `Atomic ${tag} ${index}`, status: 'active', handicapValue,
+        handicapSource: 'manual_verified', effectiveFrom: null, username: null,
+      }))
+      const args = { p_actor: owner.profileId, p_league_id: LEAGUE_ID, p_rows: rows }
+      const preview = await service.rpc('import_participants_atomic', args)
+      expect(preview.error).toBeNull()
+      const result = await service.rpc('import_participants_atomic', {
+        ...args, p_apply: true, p_preview_token: preview.data.previewToken,
+      })
+      expect(result.error?.message).toContain('Handicap rejected')
+      const { data } = await service.from('participants').select('id').ilike('display_name', `Atomic ${tag}%`)
+      expect(data).toEqual([])
+    })
+
     it('previews without writing, then applies exactly what it previewed', async () => {
       const tag = randomUUID().slice(0, 8)
       const csv =
@@ -247,7 +292,7 @@ describe('roster administration (§4.2)', () => {
       expect(beforeApply.data ?? []).toHaveLength(0)
 
       const applied = await callFunction<{ status: string; applied: number }>('catalog-admin', {
-        action: 'import-participants', leagueId: LEAGUE_ID, csv, mode: 'apply',
+        action: 'import-participants', leagueId: LEAGUE_ID, csv, mode: 'apply', previewToken: await previewToken(csv),
       }, owner.accessToken)
       expect(applied.status, JSON.stringify(applied.body)).toBe(200)
       expect(applied.body).toMatchObject({ status: 'imported', applied: 2 })
@@ -266,7 +311,7 @@ describe('roster administration (§4.2)', () => {
       const name = `Reimport ${tag}`
       const first = `display_name,handicap_index\n${name},20\n`
       await callFunction('catalog-admin', {
-        action: 'import-participants', leagueId: LEAGUE_ID, csv: first, mode: 'apply',
+        action: 'import-participants', leagueId: LEAGUE_ID, csv: first, mode: 'apply', previewToken: await previewToken(first),
       }, owner.accessToken)
 
       const tomorrow = new Date()
@@ -275,7 +320,7 @@ describe('roster administration (§4.2)', () => {
       const second = `display_name,handicap_index,effective_from\n${name},18,${effective}\n`
       const again = await callFunction<{ applied: number; plan: Array<{ action: string }> }>(
         'catalog-admin',
-        { action: 'import-participants', leagueId: LEAGUE_ID, csv: second, mode: 'apply' },
+        { action: 'import-participants', leagueId: LEAGUE_ID, csv: second, mode: 'apply', previewToken: await previewToken(second) },
         owner.accessToken,
       )
       expect(again.status, JSON.stringify(again.body)).toBe(200)
@@ -299,7 +344,7 @@ describe('roster administration (§4.2)', () => {
         status: string; applied: number; ok: boolean
         issues: Array<{ row: number; column?: string; code: string; warning: boolean }>
       }>('catalog-admin', {
-        action: 'import-participants', leagueId: LEAGUE_ID, csv, mode: 'apply',
+        action: 'import-participants', leagueId: LEAGUE_ID, csv, mode: 'apply', previewToken: await previewToken(csv),
       }, owner.accessToken)
       expect(response.status, JSON.stringify(response.body)).toBe(200)
       expect(response.body).toMatchObject({ status: 'previewed', applied: 0, ok: false })
@@ -327,7 +372,7 @@ describe('roster administration (§4.2)', () => {
         plan: Array<{ displayName: string; account: string }>
         issues: Array<{ code: string; column?: string; warning: boolean }>
       }>('catalog-admin', {
-        action: 'import-participants', leagueId: LEAGUE_ID, csv, mode: 'apply',
+        action: 'import-participants', leagueId: LEAGUE_ID, csv, mode: 'apply', previewToken: await previewToken(csv),
       }, owner.accessToken)
       expect(response.status, JSON.stringify(response.body)).toBe(200)
       expect(response.body.applied).toBe(2)

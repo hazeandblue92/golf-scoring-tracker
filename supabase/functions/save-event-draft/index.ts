@@ -30,26 +30,9 @@ Deno.serve(async (req: Request) => {
       parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '))
   }
   const body = parsed.data
-  const scramblePreset = body.competitionPreset === 'three_player_scramble'
-    || body.competitionPreset === 'four_player_scramble'
-  const rpcName = scramblePreset
-    ? 'save_phase3_scramble_event_draft'
-    : 'save_phase2_event_draft'
-  const { data, error } = await serviceClient().rpc(rpcName, {
+  const { data, error } = await serviceClient().rpc('save_event_draft_with_groups', {
     p_actor: caller.userId,
-    p_event_id: body.eventId ?? null,
-    p_league_id: body.leagueId,
-    p_season_id: body.seasonId,
-    p_name: body.name,
-    p_timezone: body.timezone,
-    p_starts_at: body.startsAt,
-    p_ends_at: body.endsAt,
-    p_visibility: body.visibility,
-    p_tee_set_id: body.teeSetId,
-    p_participant_ids: body.participantIds,
-    p_scorer_profile_ids: body.scorerProfileIds,
-    p_competition_preset: body.competitionPreset,
-    p_teams: body.teams,
+    p_body: body,
   })
   if (error) {
     const denied = error.code === '42501'

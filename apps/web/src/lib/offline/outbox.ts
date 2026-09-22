@@ -451,10 +451,10 @@ export async function reconcileResolvedConflicts(): Promise<number> {
     if (row === undefined || entityId === null) continue;
 
     const individual = conflict.event_entry_id !== null;
-    const { data: fact } = await supabase
-      .from(individual ? 'individual_hole_scores' : 'team_hole_scores')
-      .select('gross_strokes,score_status,revision')
-      .eq(individual ? 'event_entry_id' : 'event_team_id', entityId)
+    const scoreQuery = individual
+      ? supabase.from('individual_hole_scores').select('gross_strokes,score_status,revision').eq('event_entry_id', entityId)
+      : supabase.from('team_hole_scores').select('gross_strokes,score_status,revision').eq('event_team_id', entityId);
+    const { data: fact } = await scoreQuery
       .eq('event_hole_id', conflict.event_hole_id)
       .maybeSingle();
 

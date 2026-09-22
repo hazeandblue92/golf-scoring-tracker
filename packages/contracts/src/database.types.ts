@@ -2620,6 +2620,16 @@ export type Database = {
         }
         Returns: Json
       }
+      import_participants_atomic: {
+        Args: {
+          p_actor: string
+          p_apply?: boolean
+          p_league_id: string
+          p_preview_token?: string
+          p_rows: Json
+        }
+        Returns: Json
+      }
       mark_score_conflict_resolved: {
         Args: {
           p_actor: string
@@ -2710,6 +2720,10 @@ export type Database = {
         Returns: Json
       }
       restore_portable_team_scores: { Args: { p_rows: Json }; Returns: number }
+      save_event_draft_with_groups: {
+        Args: { p_actor: string; p_body: Json }
+        Returns: Json
+      }
       save_phase1_event_draft: {
         Args: {
           p_actor: string

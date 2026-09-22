@@ -90,19 +90,24 @@ describe('Phase 4 operations hardening', () => {
       correlationId,
       severity: 'error',
     }
-    const before = await userClient(owner.accessToken).rpc('phase4_operations_snapshot')
-    expect(before.error).toBeNull()
-    const priorCount = ((before.data as { recentErrors: Array<{
-      errorCode: string
-      routeFamily: string
-      occurrenceCount: number
-    }> }).recentErrors.find((row) =>
-      row.errorCode === body.errorCode && row.routeFamily === body.routeFamily
-    )?.occurrenceCount) ?? 0
     const first = await callFunction('report-error', body)
-    const second = await callFunction('report-error', body)
     expect(first.status, JSON.stringify(first.body)).toBe(202)
+    const firstBucket = await service.from('app_error_events')
+      .select('id,occurrence_count,window_started_at')
+      .eq('correlation_id', correlationId).order('window_started_at', { ascending: false }).limit(1).single()
+    expect(firstBucket.error).toBeNull()
+    const second = await callFunction('report-error', body)
     expect(second.status, JSON.stringify(second.body)).toBe(202)
+    const secondBucket = await service.from('app_error_events')
+      .select('id,occurrence_count,window_started_at')
+      .eq('correlation_id', correlationId).order('window_started_at', { ascending: false }).limit(1).single()
+    expect(secondBucket.error).toBeNull()
+    // Aggregation is hourly. A retained bucket from yesterday is not the
+    // baseline, and an hour boundary between requests creates a new bucket.
+    const expectedCount = firstBucket.data?.id === secondBucket.data?.id
+      ? Math.min(1000, firstBucket.data!.occurrence_count + 1)
+      : 1
+    expect(secondBucket.data?.occurrence_count).toBe(expectedCount)
 
     const invalid = await callFunction('report-error', {
       ...body,
@@ -125,7 +130,7 @@ describe('Phase 4 operations hardening', () => {
     }> }).recentErrors
     expect(rows).toContainEqual(expect.objectContaining({
       errorCode: 'RENDER_BOUNDARY',
-      occurrenceCount: priorCount + 2,
+      occurrenceCount: expectedCount,
       correlationId,
     }))
   })

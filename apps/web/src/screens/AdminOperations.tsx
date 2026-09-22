@@ -91,7 +91,7 @@ export function AdminOperations() {
       return {
         leagueId,
         health,
-        snapshot: snapshotResult.data as OperationsSnapshot,
+        snapshot: snapshotResult.data as unknown as OperationsSnapshot,
         events: (events ?? []) as EventExportRow[],
       };
     },

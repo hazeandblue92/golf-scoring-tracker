@@ -28,7 +28,7 @@ describe('isolated second-league boundary', () => {
     const season = await fx.service.from('seasons').insert({
       id: seasonId,
       league_id: foreignLeagueId,
-      name: 'Isolated season',
+      name: `Isolated season ${seasonId}`,
       starts_on: '2026-01-01',
       ends_on: '2026-12-31',
       status: 'planned',

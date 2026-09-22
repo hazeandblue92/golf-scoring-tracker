@@ -58,6 +58,7 @@ interface ImportPlanRow {
 }
 
 interface ImportResponse {
+  previewToken: string;
   status: string;
   applied: number;
   rowsRead: number;
@@ -282,6 +283,7 @@ export function LeaguePlayers() {
         leagueId,
         csv: csvText,
         mode,
+        ...(mode === 'apply' ? { previewToken: report?.previewToken } : {}),
       }) as unknown as ImportResponse;
       setReport(result);
       if (result.status === 'imported') {

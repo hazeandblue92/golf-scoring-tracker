@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type { Database } from '@gtt/contracts';
 
-let client: SupabaseClient | undefined;
+let client: SupabaseClient<Database> | undefined;
 
 export interface SupabaseEnv {
   url: string;
@@ -48,10 +49,10 @@ export function functionUrl(name: string): string {
  *
  * Public web variables per spec §13.5: Supabase URL and publishable key.
  */
-export function getSupabaseClient(): SupabaseClient {
+export function getSupabaseClient(): SupabaseClient<Database> {
   if (client === undefined) {
     const { url, publishableKey } = getSupabaseEnv();
-    client = createClient(url, publishableKey);
+    client = createClient<Database>(url, publishableKey);
   }
   return client;
 }

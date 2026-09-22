@@ -6,6 +6,8 @@ import {
   buildScoringFixture,
   createAccount,
   LEAGUE_ID,
+  SEASON_ID,
+  TEE_SET_BLUE,
   scoreRequest,
   totpCode,
   type ScoringFixture,
@@ -925,61 +927,100 @@ test('organizer imports a roster from CSV, then revises a handicap and an accoun
  * source event must come through untouched: it is frozen, and its published
  * snapshot decides results that already exist.
  */
-test('organizer starts a new event from a previous one without disturbing it', async ({ page }) => {
-  await buildScoringFixture({ playerCount: 4 });
+test('organizer can open an empty draft and the frozen setup of an unsupported template', async ({ page }) => {
   const service = serviceClient();
-
-  // The league owner, not an event director: creating a new event is an
-  // owner/league-admin action, and a director's grant is event-scoped.
+  const eventId = randomUUID();
+  const inserted = await service.from('events').insert({
+    id: eventId, league_id: LEAGUE_ID, season_id: SEASON_ID,
+    name: 'E2E Empty Draft', slug: `empty-${eventId}`, timezone: 'America/Detroit',
+    starts_at: new Date(Date.now() + 86400000).toISOString(), status: 'draft', visibility: 'league',
+  });
+  expect(inserted.error).toBeNull();
   await signInOrganizer(page);
-  await page.goto('/admin/events/new/setup');
+  await page.goto(`/admin/events/${eventId}/setup`);
+  await expect(page.getByLabel('Event name')).toHaveValue('E2E Empty Draft');
   await expect(page.getByRole('heading', { name: 'Event basics' })).toBeVisible();
 
-  // The picker offers the ten most recent events and this league has many by
-  // now, several of them empty drafts from other journeys. Copy one that
-  // actually has a field, so the assertions are about templating rather than
-  // about which event happened to sort first.
-  const template = page.getByLabel('Start from a previous event');
-  const offered = (await template.locator('option').evaluateAll((options) =>
-    options.map((option) => (option as HTMLOptionElement).value).filter(Boolean)));
-  expect(offered.length).toBeGreaterThan(0);
-  const { data: populated } = await service
-    .from('event_entries').select('event_id').in('event_id', offered);
-  const sourceId = offered.find((id) => (populated ?? []).some((entry) => entry.event_id === id));
-  expect(sourceId, 'at least one offered event must have a field to copy').toBeTruthy();
-
-  const { data: sourceBefore } = await service
-    .from('events').select('name, status, starts_at').eq('id', sourceId as string).single();
-  const { data: entriesBefore } = await service
-    .from('event_entries').select('participant_id').eq('event_id', sourceId as string);
-  await template.selectOption(sourceId as string);
-  await expect(page.getByText('Field, teams, flights, tee, and format copied.')).toBeVisible();
-
-  // The copied setup arrives; identity does not.
-  await expect(page.getByLabel('Event name')).toHaveValue('');
-  await expectAccessible(page);
-
-  const newName = `E2E From Template ${randomUUID().slice(0, 6)}`;
-  await page.getByLabel('Event name').fill(newName);
-  // Gross, because the copied field's handicaps are effective for the source
-  // event's date rather than a week out — the builder is right to block a net
-  // save until they are reviewed (§6.3), and that is not what this test is for.
-  await page.getByLabel('Competition preset').selectOption('individual_gross');
-  await page.getByRole('button', { name: 'Save draft' }).click();
-  await expect(page.getByText(/Draft saved/)).toBeVisible({ timeout: 30_000 });
-
-  // A second event now exists, and the one it was copied from is unchanged.
-  const { data: created } = await service
-    .from('events').select('id, status').eq('name', newName).single();
-  expect(created?.id).toBeTruthy();
-  expect(created?.id).not.toBe(sourceId);
-  const { data: copiedEntries } = await service
-    .from('event_entries').select('participant_id').eq('event_id', created?.id as string);
-  expect(copiedEntries).toHaveLength(entriesBefore?.length ?? 0);
-  expect(copiedEntries?.map((entry) => entry.participant_id).toSorted())
-    .toEqual(entriesBefore?.map((entry) => entry.participant_id).toSorted());
-
-  const { data: sourceAfter } = await service
-    .from('events').select('name, status, starts_at').eq('id', sourceId as string).single();
-  expect(sourceAfter).toEqual(sourceBefore);
+  // This fixture has a competition set outside the setup builder's presets.
+  // Reading a published event must still offer the frozen setup destinations.
+  const fixture = await buildScoringFixture({ playerCount: 4 });
+  await page.goto(`/admin/events/${fixture.eventId}/setup`);
+  await expect(page.getByRole('heading', { name: 'Setup is frozen' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Open control room' })).toBeVisible();
 });
+
+for (const preset of ['individual_gross', 'two_person_throwdown'] as const) {
+  test(`organizer copies ${preset} with its tee groups without disturbing the source`, async ({ page }) => {
+    const service = serviceClient();
+    const participantIds = Array.from({ length: 8 }, (_, index) =>
+      `00000000-0000-4000-8000-${String(201 + index).padStart(12, '0')}`);
+    const sourceGroups = [
+      { label: 'East tee', startHoleOrdinal: 10, participantIds: [participantIds[0], participantIds[1], participantIds[4], participantIds[5]] },
+      { label: 'West tee', startHoleOrdinal: 1, participantIds: [participantIds[2], participantIds[3], participantIds[6], participantIds[7]] },
+    ];
+    const source = await callFunction<{ eventId: string }>('save-event-draft', {
+      leagueId: LEAGUE_ID, seasonId: SEASON_ID,
+      name: `E2E Template Source ${randomUUID().slice(0, 6)}`,
+      timezone: 'America/Detroit', startsAt: new Date(Date.now() + 7 * 86400000).toISOString(),
+      endsAt: null, visibility: 'league', teeSetId: TEE_SET_BLUE,
+      participantIds, scorerProfileIds: [], competitionPreset: preset,
+      teams: preset === 'individual_gross' ? [] : [0, 2, 4, 6].map((offset) => ({
+        name: `Pair ${offset / 2 + 1}`, participantIds: participantIds.slice(offset, offset + 2),
+      })),
+      groups: sourceGroups,
+    }, organizer.accessToken);
+    expect(source.status, JSON.stringify(source.body)).toBe(200);
+    const sourceId = source.body.eventId;
+
+    async function readSetup(eventId: string) {
+      const event = await service.from('events').select('name,status,starts_at').eq('id', eventId).single();
+      const competitions = await service.from('competitions').select('format,metric,rules_json').eq('event_id', eventId).order('sort_order');
+      const round = await service.from('rounds').select('id').eq('event_id', eventId).single();
+      const groups = await service.from('groups')
+        .select('label,start_hole_ordinal,group_members(event_entries(participant_id),event_teams(event_team_members(event_entries(participant_id))))')
+        .eq('round_id', round.data?.id).order('sort_order');
+      for (const result of [event, competitions, round, groups]) expect(result.error).toBeNull();
+      return {
+        event: event.data,
+        competitions: competitions.data,
+        groups: groups.data?.map((group) => ({
+          label: group.label, startHoleOrdinal: group.start_hole_ordinal,
+          participantIds: group.group_members.flatMap((member) => member.event_entries
+            ? [member.event_entries.participant_id]
+            : member.event_teams.event_team_members.map((m) => m.event_entries.participant_id)).sort(),
+        })),
+      };
+    }
+    const before = await readSetup(sourceId);
+    await signInOrganizer(page);
+    await page.goto('/admin/events/new/setup');
+    await page.getByLabel('Start from a previous event').selectOption(sourceId);
+    await expect(page.getByText('Field, teams, flights, tee, and format copied.')).toBeVisible();
+    await expect(page.getByLabel('Event name')).toHaveValue('');
+    await expect(page.getByLabel('Competition preset')).toHaveValue(preset);
+    await expectAccessible(page);
+
+    const newName = `E2E From Template ${randomUUID().slice(0, 6)}`;
+    await page.getByLabel('Event name').fill(newName);
+    // Renaming a team must not silently rebuild its tee group or scorer scope.
+    if (preset === 'two_person_throwdown') await page.getByLabel('Team name', { exact: true }).first().fill('Renamed pair');
+    await page.getByRole('button', { name: 'Save draft' }).click();
+    await expect(page.getByText(/Draft saved/)).toBeVisible({ timeout: 30_000 });
+    const created = await service.from('events').select('id').eq('name', newName).single();
+    expect(created.error).toBeNull();
+    expect(created.data?.id).not.toBe(sourceId);
+    const copied = await readSetup(created.data!.id);
+    expect(copied.competitions).toEqual(before.competitions);
+    expect(copied.groups).toEqual(before.groups);
+    expect(await readSetup(sourceId)).toEqual(before);
+
+    // Reopening and saving the copy must preserve the same persisted setup.
+    await page.goto(`/admin/events/${created.data!.id}/setup`);
+    await expect(page.getByLabel('Competition preset')).toHaveValue(preset);
+    await page.getByLabel('Event name').fill(`${newName} revised`);
+    await page.getByRole('button', { name: 'Save draft' }).click();
+    await expect(page.getByText(/Draft saved/)).toBeVisible({ timeout: 30_000 });
+    expect((await readSetup(created.data!.id)).groups).toEqual(before.groups);
+    expect(await readSetup(sourceId)).toEqual(before);
+  });
+}
