@@ -40,9 +40,19 @@ been verified, so the §26 restore drill cannot start until this is done.
   gist exclusion for ever after.
 - `health` reports `schemaVersion` 39.
 
-**Still owner-only:** dry-run and apply migrations 38 and 39 to the hosted
-project, then redeploy Edge Functions and the web app and confirm the
-authenticated health body reports schema 39 and matching release stamps.
+- Migration 40 adds `import_participants_atomic`: CSV preview and apply share
+  one transaction behind a preview token, so a stale preview or a rejected
+  handicap writes nothing. Handicap audit events record before/after values.
+- Migration 41 adds `save_event_draft_with_groups`, which keeps a copied
+  event's tee groups, labels, and start holes when the grouping is unchanged.
+- `health` reports `schemaVersion` 41.
+
+**Applied 2026-09-24:** migrations 40 and 41 applied to the hosted project
+(run 35940651719, after dry runs 35939561939 and in-job), then Edge Functions
+and the web app deployed from `370a3c2` with the deployed security gate green
+(run 35940765442). The new RPC answers 42501 to an anonymous caller, so it
+exists and is service-role only. Owner check remaining: the authenticated
+health body in the operations screen reports schema 41.
 
 ## Release gates
 
@@ -114,8 +124,9 @@ requeues like any other network failure (§10.3).
 Everything below needs the owner, a vendor account, or a physical device. None
 of it can be closed by code.
 
-1. Migrations 38–39 applied to the hosted project; Edge Functions and web app
-   redeployed; authenticated health confirmed.
+1. Migrations 38–41 applied to the hosted project and Edge Functions and web
+   app redeployed (done 2026-09-24); the owner confirms schema 41 in the
+   authenticated health body on the operations screen.
 2. Backup secrets set, backup and maintenance workflows run green and retained
    (backup run 34171228255; maintenance run 34171140189). The owner still needs
    to confirm the age private identity is stored on two devices.
