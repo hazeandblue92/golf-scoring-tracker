@@ -23,4 +23,6 @@ Claude Handoff/
 # the repository. Kept on disk, out of version control.
 .agents/
 .claude/
+.codex/
 .gemini/
+.impeccable/

@@ -38,7 +38,6 @@ been verified, so the §26 restore drill cannot start until this is done.
   handicap interval and opens the next one in a single statement. The old
   insert-only path succeeded exactly once per player and then collided with the
   gist exclusion for ever after.
-- `health` reports `schemaVersion` 39.
 
 - Migration 40 adds `import_participants_atomic`: CSV preview and apply share
   one transaction behind a preview token, so a stale preview or a rejected
